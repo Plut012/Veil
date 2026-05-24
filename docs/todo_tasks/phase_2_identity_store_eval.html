@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 2: Identity Store — Evaluation</title>
+  <style>
+    body {
+      font-family: Georgia, serif;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      color: #1a1a1a;
+      background: #fafaf8;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.8rem; border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th { background: #1a1a1a; color: #fafaf8; text-align: left; padding: 8px 12px; }
+    td { border: 1px solid #ccc; padding: 8px 12px; vertical-align: top; }
+    tr:nth-child(even) td { background: #f0efe9; }
+    .pass { color: #1a7a1a; font-weight: bold; }
+    .fail { color: #9a1a1a; font-weight: bold; }
+    code { font-family: "Courier New", monospace; background: #eee; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #1a1a1a; color: #d4d0c8; padding: 16px; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+    .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .summary-box { background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 12px 16px; }
+    .summary-box strong { display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; }
+    .meta { color: #555; font-size: 0.9rem; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 2: Identity Store — Evaluation</h1>
+<p class="meta">Evaluated: 2026-05-24 &nbsp;|&nbsp; Status: <span class="pass">COMPLETE</span></p>
+
+<h2>Component Overview</h2>
+<div class="summary-grid">
+  <div class="summary-box">
+    <strong>Component</strong>
+    Veil Identity Store
+  </div>
+  <div class="summary-box">
+    <strong>Purpose</strong>
+    Manages contacts and their encryption keys. Persists contacts encrypted on disk under a passphrase-derived key. Owns the <code>~/.veil/</code> directory structure.
+  </div>
+  <div class="summary-box">
+    <strong>Key Derivation</strong>
+    Argon2id via <code>nacl.pwhash.argon2id.kdf</code> with <code>OPSLIMIT_MODERATE</code> and <code>MEMLIMIT_MODERATE</code>. 16-byte random salt stored at <code>{veil_dir}/salt</code>.
+  </div>
+  <div class="summary-box">
+    <strong>Storage Format</strong>
+    One <code>.enc</code> file per contact in <code>{veil_dir}/keyring/</code>. Contents: <code>encrypt(contact_json, storage_key)</code> using the Phase 1 crypto engine (XSalsa20-Poly1305).
+  </div>
+</div>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>src/veil/identity/contact.py</code></td>
+    <td>
+      <code>Contact</code> dataclass with fields: <code>contact_id</code> (UUID string), <code>display_name</code>, <code>key</code> (32-byte symmetric key, never written to disk in plaintext), <code>telegram_channel_id</code>, <code>telegram_user_id</code>, <code>created_at</code> (datetime, defaults to UTC now), <code>envelope_template</code> (str, defaults to empty).
+    </td>
+  </tr>
+  <tr>
+    <td><code>src/veil/identity/store.py</code></td>
+    <td>
+      <code>IdentityStore</code> class. On init: creates directories with <code>0o700</code>, derives storage key via Argon2id (generating or reading salt), loads existing contacts from disk. Public API: <code>add_contact</code>, <code>remove_contact</code>, <code>get_contact</code>, <code>get_contact_by_channel</code>, <code>list_contacts</code>, <code>update_contact</code>. Wrong-passphrase decryption failures are caught silently — store opens empty rather than crashing.
+    </td>
+  </tr>
+  <tr>
+    <td><code>src/veil/identity/__init__.py</code></td>
+    <td>Re-exports <code>Contact</code> and <code>IdentityStore</code>.</td>
+  </tr>
+  <tr>
+    <td><code>tests/test_identity.py</code></td>
+    <td>9 tests in <code>TestIdentityStore</code>. Covers: add/retrieve, persistence across instances, wrong passphrase, channel lookup, remove, list, update, directory permissions, and encrypted-on-disk verification. All use <code>tmp_path</code> — no writes to <code>~/.veil/</code>.</td>
+  </tr>
+</table>
+
+<h2>Test Results</h2>
+<pre>============================= test session starts ==============================
+platform linux -- Python 3.12.11, pytest-9.0.3, pluggy-1.6.0
+collected 9 items
+
+tests/test_identity.py::TestIdentityStore::test_add_and_retrieve           PASSED
+tests/test_identity.py::TestIdentityStore::test_persistence_across_instances PASSED
+tests/test_identity.py::TestIdentityStore::test_wrong_passphrase_fails     PASSED
+tests/test_identity.py::TestIdentityStore::test_lookup_by_channel          PASSED
+tests/test_identity.py::TestIdentityStore::test_remove_contact             PASSED
+tests/test_identity.py::TestIdentityStore::test_list_contacts              PASSED
+tests/test_identity.py::TestIdentityStore::test_update_contact             PASSED
+tests/test_identity.py::TestIdentityStore::test_directory_permissions      PASSED
+tests/test_identity.py::TestIdentityStore::test_encrypted_on_disk          PASSED
+
+============================== 9 passed in 4.63s ==============================</pre>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+    <th>Evidence</th>
+  </tr>
+  <tr>
+    <td><code>IdentityStore</code> creates <code>~/.veil/</code> and <code>~/.veil/keyring/</code> with <code>0o700</code> permissions</td>
+    <td class="pass">PASS</td>
+    <td><code>test_directory_permissions</code>: creates <code>veil_dir</code> via <code>tmp_path / "veil_test"</code>, asserts <code>oct(veil_dir.stat().st_mode)[-3:] == "700"</code>. Both <code>veil_dir</code> and <code>keyring_dir</code> use <code>mkdir(mode=0o700, exist_ok=True)</code>.</td>
+  </tr>
+  <tr>
+    <td>Passphrase is derived to a storage key using Argon2id (via <code>nacl.pwhash</code>)</td>
+    <td class="pass">PASS</td>
+    <td><code>_derive_storage_key</code> calls <code>nacl.pwhash.argon2id.kdf</code> with <code>OPSLIMIT_MODERATE</code> and <code>MEMLIMIT_MODERATE</code>. Confirmed by <code>test_wrong_passphrase_fails</code>: different passphrase → different derived key → decryption fails → empty store.</td>
+  </tr>
+  <tr>
+    <td>Salt is generated on first run and persisted at <code>~/.veil/salt</code></td>
+    <td class="pass">PASS</td>
+    <td><code>_derive_storage_key</code> checks for <code>veil_dir / "salt"</code>. If absent, generates 16 random bytes (<code>nacl.pwhash.argon2id.SALTBYTES</code>) and writes them. If present, reads them. Confirmed by <code>test_persistence_across_instances</code>: second store instance reads same salt, derives same key, decrypts contacts successfully.</td>
+  </tr>
+  <tr>
+    <td>Contacts are serialized to JSON, encrypted with the storage key, and saved as <code>.enc</code> files</td>
+    <td class="pass">PASS</td>
+    <td><code>_contact_to_json</code> serializes all fields to JSON (key encoded as URL-safe base64). <code>_save_contact</code> calls <code>encrypt(json_bytes, storage_key)</code> and writes to <code>{keyring_dir}/{contact_id}.enc</code>. Confirmed by <code>test_encrypted_on_disk</code>: file exists, <code>json.loads(raw)</code> raises an exception.</td>
+  </tr>
+  <tr>
+    <td>Contacts survive close/reopen with the same passphrase</td>
+    <td class="pass">PASS</td>
+    <td><code>test_persistence_across_instances</code>: <code>store1</code> adds contact, <code>store2</code> (new instance, same <code>tmp_path</code> and passphrase) retrieves it with the original key intact.</td>
+  </tr>
+  <tr>
+    <td>Wrong passphrase cannot read contacts</td>
+    <td class="pass">PASS</td>
+    <td><code>test_wrong_passphrase_fails</code>: store opened with <code>"wrong-passphrase"</code> returns <code>None</code> for a contact stored under <code>"correct-passphrase"</code>. Decryption failure is caught silently; store is empty.</td>
+  </tr>
+  <tr>
+    <td>Contacts are retrievable by ID and by Telegram channel ID</td>
+    <td class="pass">PASS</td>
+    <td><code>test_add_and_retrieve</code>: <code>get_contact(contact_id)</code> returns correct contact. <code>test_lookup_by_channel</code>: <code>get_contact_by_channel(123456)</code> returns matching contact.</td>
+  </tr>
+  <tr>
+    <td>Contacts can be added, removed, updated, and listed</td>
+    <td class="pass">PASS</td>
+    <td><code>test_add_and_retrieve</code>, <code>test_remove_contact</code> (also verifies <code>.enc</code> file deletion), <code>test_update_contact</code> (display name change persists in memory), <code>test_list_contacts</code> (3 contacts → <code>len == 3</code>).</td>
+  </tr>
+  <tr>
+    <td>Contact files on disk are not readable as plaintext</td>
+    <td class="pass">PASS</td>
+    <td><code>test_encrypted_on_disk</code>: raw bytes of <code>.enc</code> file raise an exception when passed to <code>json.loads</code>.</td>
+  </tr>
+  <tr>
+    <td>All tests pass: <code>uv run pytest tests/test_identity.py -v</code></td>
+    <td class="pass">PASS</td>
+    <td>9/9 passed, 4.63s</td>
+  </tr>
+</table>
+
+</body>
+</html>
