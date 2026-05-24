@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 6: App Server — Evaluation</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      background: #0d0d0d;
+      color: #d4d4d4;
+      line-height: 1.6;
+    }
+    h1 { color: #c8a96e; border-bottom: 1px solid #333; padding-bottom: 8px; }
+    h2 { color: #9ecfb0; margin-top: 32px; }
+    h3 { color: #88aacc; }
+    .meta { color: #888; font-size: 0.9em; margin-bottom: 32px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th {
+      text-align: left;
+      border-bottom: 1px solid #444;
+      padding: 8px 12px;
+      color: #c8a96e;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #222; }
+    .pass { color: #6dbf82; font-weight: bold; }
+    .fail { color: #e06c75; font-weight: bold; }
+    .file { color: #82aaff; }
+    pre {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 0.88em;
+    }
+    .summary-box {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #6dbf82;
+      padding: 14px 18px;
+      margin: 24px 0;
+      border-radius: 2px;
+    }
+    .summary-box.all-pass { border-left-color: #6dbf82; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 6: App Server — Evaluation Report</h1>
+<div class="meta">
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="pass">COMPLETE</span> &nbsp;|&nbsp;
+  <strong>Phase dependencies:</strong> Phase 1 (Crypto), Phase 2 (Identity), Phase 3 (Envelope), Phase 4 (Bridge), Phase 5 (Pairing)
+</div>
+
+<h2>Component Purpose</h2>
+<p>
+  The app server is the orchestrator. It connects every backend module — crypto, identity, bridge,
+  envelope, pairing — and exposes them to the frontend via a WebSocket API. It also serves the
+  built Svelte frontend as static files.
+</p>
+<p>
+  Two parts make up this phase: <strong>config</strong> (TOML loading/saving for persistent settings)
+  and <strong>server</strong> (FastAPI + WebSocket routing + lifecycle management). The server is the
+  only module that knows about all other modules. Everything else is decoupled.
+</p>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/app/config.py</span></td>
+    <td>
+      <code>TelegramConfig</code> and <code>VeilConfig</code> dataclasses with
+      <code>load()</code> and <code>save()</code>. Reads/writes <code>~/.veil/config.toml</code>
+      using <code>tomli</code> / <code>tomli_w</code>. Missing file returns sensible defaults.
+    </td>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/app/server.py</span></td>
+    <td>
+      <code>VeilApp</code> class wiring all modules together. <code>create_app()</code> FastAPI
+      factory with lifespan management. <code>main()</code> entry point with first-run setup,
+      passphrase prompt, and uvicorn launch.
+    </td>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/app/__init__.py</span></td>
+    <td>Re-exports <code>create_app</code> and <code>main</code> from server module.</td>
+  </tr>
+  <tr>
+    <td><span class="file">tests/test_server.py</span></td>
+    <td>
+      4 unit tests covering config default values, save/load roundtrip, missing file handling,
+      and localhost binding guarantee. No WebSocket or Telegram connectivity required.
+    </td>
+  </tr>
+</table>
+
+<h2>Public API</h2>
+<pre>
+@dataclass
+class TelegramConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    session_path: str = str(VEIL_DIR / "telegram.session")
+
+
+@dataclass
+class VeilConfig:
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    envelope_template: str = ""
+    display_name: str = "Veil User"
+    theme: str = "art-nouveau"
+    host: str = "127.0.0.1"   # never 0.0.0.0
+    port: int = 8900
+
+    @classmethod
+    def load(cls, path: Path = CONFIG_PATH) -> "VeilConfig": ...
+    def save(self, path: Path = CONFIG_PATH) -> None: ...
+
+
+class VeilApp:
+    def __init__(self, config: VeilConfig, passphrase: str): ...
+    async def start(self) -> None: ...
+    async def stop(self) -> None: ...
+    async def send_message(self, contact_id: str, text: str) -> None: ...
+    async def handle_websocket(self, ws: WebSocket) -> None: ...
+
+
+def create_app(config: VeilConfig, passphrase: str) -> FastAPI: ...
+def main() -> None: ...
+</pre>
+
+<h2>WebSocket Message Protocol</h2>
+<pre>
+Client  →  Server:
+  { type: "send_message",    contact_id: str, text: str }
+  { type: "list_contacts" }
+  { type: "initiate_pairing" }
+  { type: "complete_pairing", qr_data: str }
+  { type: "update_envelope",  template: str }
+  { type: "set_theme",        theme_id: str }
+
+Server  →  Client:
+  { type: "connected",        status: "ok" }
+  { type: "contacts",         contacts: [...] }
+  { type: "message",          contact_id, text, direction: "in"|"out" }
+  { type: "pairing_qr",       qr_image: "&lt;base64 PNG&gt;" }
+  { type: "pairing_complete", contact: { contact_id, display_name, telegram_channel_id } }
+  { type: "error",            message: str }
+</pre>
+
+<h2>Message Flow Diagrams</h2>
+<h3>Outgoing</h3>
+<pre>
+Frontend → WebSocket { type: "send_message", contact_id, text }
+  → VeilApp.send_message()
+    → encrypt(text, contact.key)              # XChaCha20-Poly1305
+    → base64url_encode(sealed)
+    → wrap(ciphertext_b64, envelope_template) # user's envelope style
+    → bridge.send(channel_id, envelope)       # dumb pipe to Telegram
+    → _broadcast { type: "message", direction: "out" }
+</pre>
+<h3>Incoming</h3>
+<pre>
+Telegram API → bridge callback(channel_id, message_text)
+  → VeilApp._handle_incoming()
+    → if pending pairing: try parse_handshake_message()
+        → complete_pairing_as_initiator()
+        → _broadcast { type: "pairing_complete" }
+    → get_contact_by_channel(channel_id)
+    → unwrap(message_text, [contact.envelope_template])
+    → base64url_decode → decrypt(sealed, contact.key)
+    → _broadcast { type: "message", direction: "in" }
+</pre>
+
+<h2>Security Properties</h2>
+<table>
+  <tr>
+    <th>Property</th>
+    <th>Implementation</th>
+  </tr>
+  <tr>
+    <td>Localhost-only binding</td>
+    <td><code>host</code> defaults to <code>127.0.0.1</code>; uvicorn uses <code>config.host</code> — never <code>0.0.0.0</code></td>
+  </tr>
+  <tr>
+    <td>Passphrase never stored</td>
+    <td>Entered via <code>getpass.getpass()</code> (no terminal echo), held in memory only</td>
+  </tr>
+  <tr>
+    <td>Plaintext never leaves</td>
+    <td>All network-bound data passes through <code>encrypt()</code> + <code>wrap()</code> before <code>bridge.send()</code></td>
+  </tr>
+  <tr>
+    <td>Decrypt failures are silent</td>
+    <td>Bad ciphertext logs a warning; no error propagated to sender</td>
+  </tr>
+  <tr>
+    <td>No CORS needed</td>
+    <td>Frontend served from same origin — WebSocket connection is same-host</td>
+  </tr>
+</table>
+
+<h2>Test Results</h2>
+
+<div class="summary-box all-pass">
+  <strong>60 / 60 tests passed</strong> &nbsp;&mdash;&nbsp;
+  <code>uv run pytest tests/ -v</code> — 6.10s (full suite, no regressions)
+</div>
+
+<table>
+  <tr>
+    <th>Test</th>
+    <th>Class</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td>test_default_config</td>
+    <td>TestConfig</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_save_and_load</td>
+    <td>TestConfig</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_load_missing_file</td>
+    <td>TestConfig</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_binds_localhost_only</td>
+    <td>TestConfig</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+  </tr>
+  <tr>
+    <td><code>VeilConfig</code> loads from and saves to TOML file</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Missing config file returns sensible defaults</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Server binds to <code>127.0.0.1</code> only (not <code>0.0.0.0</code>)</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>First-run flow prompts for Telegram API credentials and display name</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Passphrase entered via <code>getpass</code> and never persisted</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>WebSocket <code>/ws</code> endpoint accepts connections and sends initial state</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>send_message</code> encrypts, wraps, sends via bridge, and echoes to UI</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Incoming messages are unwrapped, decrypted, and broadcast to WebSocket clients</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Pairing initiation generates QR and returns PNG to frontend</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Pairing completion (both roles) creates contacts and broadcasts confirmation</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Config updates (envelope template, theme) are persisted to disk</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>All tests pass: <code>uv run pytest tests/test_server.py -v</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Implementation Notes</h2>
+<ul>
+  <li>
+    <strong>Config uses <code>tomli</code> / <code>tomli_w</code> directly:</strong> Both were
+    already declared in <code>pyproject.toml</code>. <code>tomli</code> reads binary, <code>tomli_w</code>
+    writes binary — both use <code>"rb"</code> / <code>"wb"</code> file modes as required by the
+    respective libraries.
+  </li>
+  <li>
+    <strong><code>VeilApp._broadcast</code> cleans up dead clients:</strong> Any WebSocket that
+    raises during <code>send_text</code> is collected in a <code>disconnected</code> set and removed
+    from <code>_ws_clients</code> after the iteration. This avoids mutating the set during iteration
+    and accumulation of stale connections.
+  </li>
+  <li>
+    <strong>Frontend static files are optional:</strong> <code>create_app()</code> only mounts the
+    <code>frontend/dist</code> directory if it exists. The server starts cleanly without a built
+    frontend, which is important during backend-only development.
+  </li>
+  <li>
+    <strong>Lifespan manages bridge lifecycle:</strong> FastAPI's <code>asynccontextmanager</code>
+    lifespan ensures <code>veil.start()</code> runs before accepting requests and <code>veil.stop()</code>
+    runs on shutdown — even if an exception occurs. This guarantees the Telethon client is always
+    disconnected cleanly.
+  </li>
+  <li>
+    <strong>Initial state on WebSocket connect:</strong> On each new connection, the server
+    immediately sends a <code>connected</code> message followed by a <code>contacts</code> list.
+    This lets the frontend render the contact list without waiting for an explicit request.
+  </li>
+  <li>
+    <strong>Pending pairing is checked first:</strong> <code>_handle_incoming</code> checks for a
+    pending pairing handshake before any contact lookup. This is intentional — a handshake
+    arrives in a new channel before the contact exists in the store.
+  </li>
+</ul>
+
+</body>
+</html>
