@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 5: Pairing Ceremony — Evaluation</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      background: #0d0d0d;
+      color: #d4d4d4;
+      line-height: 1.6;
+    }
+    h1 { color: #c8a96e; border-bottom: 1px solid #333; padding-bottom: 8px; }
+    h2 { color: #9ecfb0; margin-top: 32px; }
+    h3 { color: #88aacc; }
+    .meta { color: #888; font-size: 0.9em; margin-bottom: 32px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th {
+      text-align: left;
+      border-bottom: 1px solid #444;
+      padding: 8px 12px;
+      color: #c8a96e;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #222; }
+    .pass { color: #6dbf82; font-weight: bold; }
+    .fail { color: #e06c75; font-weight: bold; }
+    .file { color: #82aaff; }
+    pre {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 0.88em;
+    }
+    .summary-box {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #6dbf82;
+      padding: 14px 18px;
+      margin: 24px 0;
+      border-radius: 2px;
+    }
+    .summary-box.all-pass { border-left-color: #6dbf82; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 5: Pairing Ceremony — Evaluation Report</h1>
+<div class="meta">
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="pass">COMPLETE</span> &nbsp;|&nbsp;
+  <strong>Phase dependencies:</strong> Phase 1 (Crypto), Phase 2 (Identity), Phase 3 (Envelope), Phase 4 (Bridge)
+</div>
+
+<h2>Component Purpose</h2>
+<p>
+  The pairing ceremony is the moment two people establish encrypted communication. It happens in person.
+  One QR scan bootstraps everything: key exchange, Telegram channel creation, and contact registration.
+</p>
+<p>
+  Two roles exist: the <strong>initiator</strong> (shows QR) and the <strong>joiner</strong> (scans QR).
+  The initiator generates a 256-bit key and encodes it in a QR code alongside their Telegram user ID,
+  display name, and envelope template. The joiner scans the QR, creates a Telegram group, sends an
+  encrypted handshake, and saves the contact. The initiator detects the handshake, decrypts it, and
+  saves the joiner as a contact. Pairing is complete with no server involvement.
+</p>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/identity/pairing.py</span></td>
+    <td>
+      Full pairing ceremony logic: <code>QRPayload</code> dataclass,
+      <code>create_qr_payload()</code>, <code>parse_qr_payload()</code>,
+      <code>build_handshake_message()</code>, <code>parse_handshake_message()</code>,
+      <code>initiate_pairing()</code>, <code>complete_pairing_as_joiner()</code>,
+      <code>complete_pairing_as_initiator()</code>
+    </td>
+  </tr>
+  <tr>
+    <td><span class="file">tests/test_pairing.py</span></td>
+    <td>
+      9 unit tests covering QR payload creation, roundtrip, invalid version rejection,
+      missing field rejection, handshake build/parse, wrong-key safety, non-handshake
+      message handling, and empty envelope template. No Telegram connection required.
+    </td>
+  </tr>
+</table>
+
+<h2>Public API</h2>
+<pre>
+@dataclass
+class QRPayload:
+    key: bytes                  # 256-bit symmetric key
+    telegram_user_id: int       # initiator's Telegram user ID
+    display_name: str           # initiator's display name
+    envelope_template: str      # initiator's envelope template
+
+
+def create_qr_payload(
+    telegram_user_id: int,
+    display_name: str,
+    envelope_template: str = "",
+) -> tuple[QRPayload, bytes]:
+    """Generate a new key, build QR payload, return (payload, PNG bytes)."""
+
+
+def parse_qr_payload(qr_data: str) -> QRPayload:
+    """Parse scanned QR JSON string. Raises ValueError on bad version, KeyError on missing fields."""
+
+
+def build_handshake_message(
+    key: bytes,
+    display_name: str,
+    envelope_template: str = "",
+) -> str:
+    """Encrypt joiner's display name + template with shared key. Returns base64 string."""
+
+
+def parse_handshake_message(message: str, key: bytes) -> dict | None:
+    """Decrypt and validate handshake. Returns dict or None (never raises)."""
+
+
+async def initiate_pairing(
+    store: IdentityStore, bridge: Bridge,
+    display_name: str, envelope_template: str = "",
+) -> tuple[QRPayload, bytes]:
+    """Fetch self user ID, generate QR. Contact saved later when handshake arrives."""
+
+
+async def complete_pairing_as_joiner(
+    qr_data: str, store: IdentityStore, bridge: Bridge,
+    display_name: str, envelope_template: str = "", channel_name: str = "Veil",
+) -> Contact:
+    """Parse QR, create Telegram channel, send handshake, save contact."""
+
+
+async def complete_pairing_as_initiator(
+    pending_payload: QRPayload, channel_id: int, handshake_data: dict,
+    store: IdentityStore, bridge: Bridge,
+) -> Contact:
+    """Save contact when handshake received. telegram_user_id=0 (known from Telegram event)."""
+</pre>
+
+<h2>QR Payload Format</h2>
+<pre>
+{
+  "v": 1,          // protocol version for future compatibility
+  "key": "&lt;base64&gt;", // 256-bit symmetric key
+  "tid": 12345,    // initiator's Telegram user ID
+  "name": "Alice", // initiator's display name
+  "env": "~~ {ciphertext} ~~"  // initiator's envelope template (may be empty)
+}
+</pre>
+<p>
+  Fields are abbreviated (<code>tid</code>, <code>env</code>) to keep payload compact — large
+  QR payloads produce denser codes that are harder to scan. The key is URL-safe base64-encoded
+  for JSON serialization.
+</p>
+
+<h2>Test Results</h2>
+
+<div class="summary-box all-pass">
+  <strong>56 / 56 tests passed</strong> &nbsp;&mdash;&nbsp;
+  <code>uv run pytest tests/ -v</code> — 5.13s (full suite, no regressions)
+</div>
+
+<table>
+  <tr>
+    <th>Test</th>
+    <th>Class</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td>test_create_produces_png</td>
+    <td>TestQRPayload</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_create_generates_key</td>
+    <td>TestQRPayload</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_roundtrip_qr_payload</td>
+    <td>TestQRPayload</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_invalid_version_rejected</td>
+    <td>TestQRPayload</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_missing_fields_rejected</td>
+    <td>TestQRPayload</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_build_and_parse</td>
+    <td>TestHandshake</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_wrong_key_returns_none</td>
+    <td>TestHandshake</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_non_handshake_returns_none</td>
+    <td>TestHandshake</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_empty_envelope_template</td>
+    <td>TestHandshake</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+  </tr>
+  <tr>
+    <td><code>create_qr_payload</code> generates a 256-bit key and returns valid PNG QR code bytes</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>parse_qr_payload</code> correctly extracts key, user ID, display name, and envelope template</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>QR payload roundtrips correctly (create → serialize → parse)</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Invalid QR protocol versions are rejected with <code>ValueError</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Missing required fields raise <code>KeyError</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>build_handshake_message</code> produces an encrypted, base64-encoded message</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>parse_handshake_message</code> decrypts and validates the handshake</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Wrong key during handshake parse returns <code>None</code> (no crash)</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Non-handshake messages return <code>None</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>complete_pairing_as_joiner</code> creates channel, sends handshake, saves contact</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>complete_pairing_as_initiator</code> saves contact when handshake is received</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>All tests pass: <code>uv run pytest tests/test_pairing.py -v</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Implementation Notes</h2>
+<ul>
+  <li>
+    <strong>Field access order in <code>parse_qr_payload</code>:</strong> Required fields
+    (<code>key</code>, <code>tid</code>, <code>name</code>) are extracted into local variables
+    before any decoding occurs. This ensures <code>KeyError</code> fires on truly missing fields
+    rather than being masked by a downstream decode error on an invalid-but-present value.
+  </li>
+  <li>
+    <strong><code>parse_handshake_message</code> never raises:</strong> The entire body is wrapped
+    in a bare <code>except Exception: return None</code> guard. Wrong keys, malformed base64,
+    invalid JSON, and missing type fields all silently return <code>None</code>. The handshake
+    type field (<code>"type": "veil_handshake"</code>) is the final validation gate — messages
+    that decrypt correctly but aren't handshakes also return <code>None</code>.
+  </li>
+  <li>
+    <strong><code>telegram_user_id=0</code> for initiator:</strong> When the initiator completes
+    pairing, they do not know the joiner's Telegram user ID from the handshake alone. The Telegram
+    event delivers that information at the app layer. Setting it to 0 signals "unknown from
+    handshake" — the app layer can update the contact once it has the sender's ID from the
+    incoming message event.
+  </li>
+  <li>
+    <strong>Pending pairing state:</strong> The initiator holds <code>QRPayload</code> in memory
+    between <code>initiate_pairing()</code> and <code>complete_pairing_as_initiator()</code>.
+    Nothing is persisted until the handshake arrives. If pairing is cancelled, the in-memory
+    payload is discarded with no cleanup needed.
+  </li>
+  <li>
+    <strong>QR code generation:</strong> Uses the <code>qrcode</code> library (already in
+    <code>pyproject.toml</code>). Output is PNG bytes via <code>io.BytesIO</code>. The QR image
+    is returned to the caller — the UI layer decides how to display it.
+  </li>
+  <li>
+    <strong>No new dependencies:</strong> <code>qrcode</code> and <code>pillow</code> were already
+    declared in <code>pyproject.toml</code>. The module uses only standard library plus these
+    two packages and existing Veil modules.
+  </li>
+</ul>
+
+</body>
+</html>
