@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 1: Crypto Engine — Evaluation</title>
+  <style>
+    body {
+      font-family: Georgia, serif;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      color: #1a1a1a;
+      background: #fafaf8;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.8rem; border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th { background: #1a1a1a; color: #fafaf8; text-align: left; padding: 8px 12px; }
+    td { border: 1px solid #ccc; padding: 8px 12px; vertical-align: top; }
+    tr:nth-child(even) td { background: #f0efe9; }
+    .pass { color: #1a7a1a; font-weight: bold; }
+    .fail { color: #9a1a1a; font-weight: bold; }
+    code { font-family: "Courier New", monospace; background: #eee; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #1a1a1a; color: #d4d0c8; padding: 16px; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+    .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .summary-box { background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 12px 16px; }
+    .summary-box strong { display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; }
+    .meta { color: #555; font-size: 0.9rem; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 1: Crypto Engine — Evaluation</h1>
+<p class="meta">Evaluated: 2026-05-24 &nbsp;|&nbsp; Status: <span class="pass">COMPLETE</span></p>
+
+<h2>Component Overview</h2>
+<div class="summary-grid">
+  <div class="summary-box">
+    <strong>Component</strong>
+    Veil Crypto Engine
+  </div>
+  <div class="summary-box">
+    <strong>Purpose</strong>
+    Pure symmetric encryption/decryption using XSalsa20-Poly1305 (PyNaCl SecretBox). No side effects, no platform awareness.
+  </div>
+  <div class="summary-box">
+    <strong>Primitive</strong>
+    XSalsa20-Poly1305 via libsodium (PyNaCl SecretBox) — 24-byte random nonce, 16-byte auth tag
+  </div>
+  <div class="summary-box">
+    <strong>Key Size</strong>
+    256-bit (32 bytes), URL-safe base64 serialisation
+  </div>
+</div>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>src/veil/crypto/engine.py</code></td>
+    <td><code>encrypt(plaintext, key) -&gt; bytes</code> and <code>decrypt(sealed, key) -&gt; bytes</code>. Delegates entirely to PyNaCl SecretBox — random nonce generated per call, auth tag verified on decrypt. CryptoError propagates to caller.</td>
+  </tr>
+  <tr>
+    <td><code>src/veil/crypto/keys.py</code></td>
+    <td><code>generate_key()</code> — 32 random bytes via <code>nacl.utils.random</code>. <code>key_to_base64()</code> / <code>key_from_base64()</code> — URL-safe base64 with length validation on decode.</td>
+  </tr>
+  <tr>
+    <td><code>src/veil/crypto/__init__.py</code></td>
+    <td>Re-exports all five public symbols: <code>encrypt</code>, <code>decrypt</code>, <code>generate_key</code>, <code>key_to_base64</code>, <code>key_from_base64</code>.</td>
+  </tr>
+  <tr>
+    <td><code>tests/test_crypto.py</code></td>
+    <td>14 tests across three classes: <code>TestEncryptDecrypt</code>, <code>TestKeyGeneration</code>, <code>TestKeyEncoding</code>. All use real crypto — no mocks.</td>
+  </tr>
+</table>
+
+<h2>Test Results</h2>
+<pre>============================= test session starts ==============================
+platform linux -- Python 3.12.11, pytest-9.0.3
+collected 14 items
+
+tests/test_crypto.py::TestEncryptDecrypt::test_roundtrip              PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_empty_message           PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_unicode_message         PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_large_message           PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_wrong_key_fails         PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_tampered_ciphertext_fails PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_truncated_ciphertext_fails PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_unique_nonces           PASSED
+tests/test_crypto.py::TestEncryptDecrypt::test_sealed_format_size      PASSED
+tests/test_crypto.py::TestKeyGeneration::test_key_length               PASSED
+tests/test_crypto.py::TestKeyGeneration::test_keys_are_unique          PASSED
+tests/test_crypto.py::TestKeyEncoding::test_roundtrip                  PASSED
+tests/test_crypto.py::TestKeyEncoding::test_encoded_is_string          PASSED
+tests/test_crypto.py::TestKeyEncoding::test_invalid_length_rejected    PASSED
+
+============================== 14 passed in 0.08s ==============================</pre>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+    <th>Evidence</th>
+  </tr>
+  <tr>
+    <td><code>encrypt(plaintext, key)</code> returns sealed bytes (nonce + ciphertext + auth tag)</td>
+    <td class="pass">PASS</td>
+    <td><code>test_sealed_format_size</code>: asserts <code>len(sealed) == 24 + len(plaintext) + 16</code></td>
+  </tr>
+  <tr>
+    <td><code>decrypt(sealed, key)</code> returns original plaintext</td>
+    <td class="pass">PASS</td>
+    <td><code>test_roundtrip</code>, <code>test_empty_message</code>, <code>test_unicode_message</code>, <code>test_large_message</code></td>
+  </tr>
+  <tr>
+    <td>Wrong key raises <code>CryptoError</code></td>
+    <td class="pass">PASS</td>
+    <td><code>test_wrong_key_fails</code></td>
+  </tr>
+  <tr>
+    <td>Tampered ciphertext raises <code>CryptoError</code></td>
+    <td class="pass">PASS</td>
+    <td><code>test_tampered_ciphertext_fails</code> (flips last byte of auth tag), <code>test_truncated_ciphertext_fails</code></td>
+  </tr>
+  <tr>
+    <td>Each encryption of the same plaintext produces different output (random nonce)</td>
+    <td class="pass">PASS</td>
+    <td><code>test_unique_nonces</code>: same key + same plaintext produces two distinct sealed values; both decrypt to the same plaintext</td>
+  </tr>
+  <tr>
+    <td><code>generate_key()</code> returns 32 random bytes</td>
+    <td class="pass">PASS</td>
+    <td><code>test_key_length</code>: asserts <code>len(key) == 32</code>; <code>test_keys_are_unique</code>: 100 keys all distinct</td>
+  </tr>
+  <tr>
+    <td>Keys roundtrip through base64 encoding</td>
+    <td class="pass">PASS</td>
+    <td><code>TestKeyEncoding::test_roundtrip</code>: <code>key_from_base64(key_to_base64(key)) == key</code></td>
+  </tr>
+  <tr>
+    <td>All tests pass: <code>uv run pytest tests/test_crypto.py -v</code></td>
+    <td class="pass">PASS</td>
+    <td>14/14 passed, 0.08s</td>
+  </tr>
+  <tr>
+    <td>No file I/O, no side effects, no platform awareness in the crypto module</td>
+    <td class="pass">PASS</td>
+    <td><code>engine.py</code> imports only <code>nacl.utils</code> and <code>nacl.secret</code>; <code>keys.py</code> imports only <code>nacl.utils</code> and <code>base64</code>. No filesystem, network, or platform calls anywhere in the module.</td>
+  </tr>
+</table>
+
+</body>
+</html>

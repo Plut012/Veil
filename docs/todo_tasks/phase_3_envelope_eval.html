@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 3: Envelope — Evaluation</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      background: #0d0d0d;
+      color: #d4d4d4;
+      line-height: 1.6;
+    }
+    h1 { color: #c8a96e; border-bottom: 1px solid #333; padding-bottom: 8px; }
+    h2 { color: #9ecfb0; margin-top: 32px; }
+    h3 { color: #88aacc; }
+    .meta { color: #888; font-size: 0.9em; margin-bottom: 32px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th {
+      text-align: left;
+      border-bottom: 1px solid #444;
+      padding: 8px 12px;
+      color: #c8a96e;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #222; }
+    .pass { color: #6dbf82; font-weight: bold; }
+    .fail { color: #e06c75; font-weight: bold; }
+    .file { color: #82aaff; }
+    pre {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 0.88em;
+    }
+    .summary-box {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #6dbf82;
+      padding: 14px 18px;
+      margin: 24px 0;
+      border-radius: 2px;
+    }
+    .summary-box.all-pass { border-left-color: #6dbf82; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 3: Envelope — Evaluation Report</h1>
+<div class="meta">
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="pass">COMPLETE</span> &nbsp;|&nbsp;
+  <strong>Phase dependencies:</strong> None (standalone)
+</div>
+
+<h2>Component Purpose</h2>
+<p>
+  The envelope module wraps ciphertext in user-configurable templates before sending to a
+  messaging platform, and extracts ciphertext from incoming messages by matching against
+  known templates. This gives encrypted messages visual personality without affecting the
+  crypto layer — the envelope is purely cosmetic framing for the ciphertext.
+</p>
+<p>
+  The module is a clean boundary: it knows nothing about Telegram, keys, or the UI. It takes
+  a base64 string in and returns a formatted string out, or the reverse.
+</p>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/envelope/format.py</span></td>
+    <td>Core implementation: <code>wrap()</code>, <code>unwrap()</code>, <code>build_pattern()</code></td>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/envelope/__init__.py</span></td>
+    <td>Re-exports public API: <code>wrap</code>, <code>unwrap</code></td>
+  </tr>
+  <tr>
+    <td><span class="file">tests/test_envelope.py</span></td>
+    <td>Full test suite — 13 tests across <code>TestWrap</code> and <code>TestUnwrap</code></td>
+  </tr>
+</table>
+
+<h2>Public API</h2>
+<pre>
+def wrap(ciphertext_b64: str, template: str) -> str:
+    """Substitute {ciphertext} in template. Empty template returns raw ciphertext."""
+
+def unwrap(message: str, templates: list[str]) -> str | None:
+    """Try each template in order; return first matched ciphertext, or None."""
+
+def build_pattern(template: str) -> re.Pattern:
+    """Convert template to compiled regex with one capture group for ciphertext."""
+</pre>
+
+<h2>Test Results</h2>
+
+<div class="summary-box all-pass">
+  <strong>13 / 13 tests passed</strong> &nbsp;&mdash;&nbsp;
+  <code>uv run pytest tests/test_envelope.py -v</code> — 0.04s
+</div>
+
+<table>
+  <tr>
+    <th>Test</th>
+    <th>Class</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td>test_simple_template</td>
+    <td>TestWrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_prefix_template</td>
+    <td>TestWrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_empty_template</td>
+    <td>TestWrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_no_placeholder_in_template</td>
+    <td>TestWrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_emoji_template</td>
+    <td>TestWrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_match_simple</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_match_prefix</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_match_empty_template</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_no_match_returns_none</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_multiple_templates_first_match</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_emoji_template_match</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_real_base64_ciphertext</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_partial_match_not_confused</td>
+    <td>TestUnwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+  </tr>
+  <tr>
+    <td><code>wrap(ciphertext, template)</code> substitutes <code>{ciphertext}</code> placeholder and returns formatted string</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>wrap</code> with empty template returns raw ciphertext</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>unwrap(message, templates)</code> extracts ciphertext from first matching template</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>unwrap</code> returns <code>None</code> for non-Veil messages</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Templates with emojis and special characters work correctly</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Base64 ciphertext roundtrips through wrap/unwrap</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>All tests pass: <code>uv run pytest tests/test_envelope.py -v</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Implementation Notes</h2>
+<ul>
+  <li>No external dependencies — only the Python standard library <code>re</code> module.</li>
+  <li>Template substitution uses plain <code>str.replace</code>; no Jinja or special syntax needed.</li>
+  <li>
+    <code>build_pattern</code> escapes all template characters via <code>re.escape</code> before
+    splicing in the base64 capture group, so templates with regex-significant characters
+    (brackets, dots, pipes) work correctly.
+  </li>
+  <li>
+    Base64 character class <code>[A-Za-z0-9_\-=+/]</code> covers both standard and URL-safe
+    base64 variants, ensuring real ciphertext from PyNaCl roundtrips cleanly.
+  </li>
+  <li>
+    Empty-template unwrap uses an anchored pattern (<code>^...$</code>) to avoid false positives
+    on messages that contain incidental base64-looking substrings alongside other text.
+  </li>
+  <li>
+    The <code>tests/</code> directory was created as part of this phase (it did not previously
+    exist). An <code>__init__.py</code> was added alongside the test file.
+  </li>
+</ul>
+
+</body>
+</html>
