@@ -1,0 +1,94 @@
+/* Veil — Base Styles */
+
+:root {
+  --color-bg:           #2a2520;
+  --color-bg-surface:   #352f29;
+  --color-bg-elevated:  #3f3832;
+  --color-text:         #d4c5b3;
+  --color-text-muted:   #8a7e71;
+  --color-accent:       #c4956a;
+  --color-accent-dim:   #8a6848;
+  --color-border:       #4a4238;
+  --color-msg-in:       #3a342e;
+  --color-msg-out:      #4a3f34;
+  --color-success:      #7a9a6a;
+  --color-error:        #9a5a4a;
+
+  --font-body:          "IBM Plex Sans", sans-serif;
+  --font-mono:          "IBM Plex Mono", monospace;
+
+  --radius-sm:          4px;
+  --radius-md:          8px;
+  --spacing-xs:         4px;
+  --spacing-sm:         8px;
+  --spacing-md:         16px;
+  --spacing-lg:         24px;
+
+  --transition-fast:    120ms ease;
+  --transition-normal:  250ms ease;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input, textarea {
+  font-family: var(--font-body);
+  font-size: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-text);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}

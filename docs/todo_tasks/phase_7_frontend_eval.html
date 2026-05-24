@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Phase 7 Frontend — Evaluation</title>
+<style>
+  :root {
+    --bg: #2a2520;
+    --surface: #352f29;
+    --elevated: #3f3832;
+    --text: #d4c5b3;
+    --muted: #8a7e71;
+    --accent: #c4956a;
+    --accent-dim: #8a6848;
+    --border: #4a4238;
+    --success: #7a9a6a;
+    --error: #9a5a4a;
+    --font: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 40px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin: 32px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  p { margin-bottom: 10px; color: var(--muted); }
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--elevated);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--text);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+  .checklist { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .check { color: var(--success); font-size: 13px; flex-shrink: 0; margin-top: 2px; }
+  .check.warn { color: var(--accent); }
+  .item-text { flex: 1; }
+  .item-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .file-tree {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.8;
+  }
+  .file-tree .acc { color: var(--accent); }
+  .section-desc { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .divider { height: 1px; background: var(--border); margin: 24px 0; }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--success);
+    color: var(--success);
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Veil — Phase 7 Frontend Evaluation <span class="badge">COMPLETE</span></h1>
+<p>SvelteKit app implementing the messaging UI over WebSocket. Built 2026-05-24.</p>
+
+<h2>Acceptance Criteria</h2>
+<ul class="checklist">
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      SvelteKit project initializes and builds
+      <div class="item-note"><code>npm run build</code> → <code>dist/</code> via adapter-static. Zero errors.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      WebSocket connects to backend on page load
+      <div class="item-note"><code>VeilSocket.connect()</code> called in <code>+page.svelte</code> onMount. URL: <code>ws://127.0.0.1:8900/ws</code></div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Auto-reconnect on WebSocket disconnect
+      <div class="item-note">Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max). Restarts on unexpected close.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Contact list renders from backend state
+      <div class="item-note">Backend sends <code>{ type: "contacts" }</code> on connect. <code>setContacts()</code> updates the Svelte store. <code>ContactList</code> renders reactively.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Selecting a contact shows conversation view
+      <div class="item-note"><code>selectedContactId</code> store drives <code>ChatView</code>. Shows contact name in header, message list, compose area.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Typing and sending a message works end-to-end
+      <div class="item-note"><code>Compose</code> sends on Enter (Shift+Enter = newline). Calls <code>veilSocket.sendMessage()</code>. Backend echoes <code>direction: "out"</code>.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Incoming messages appear in real-time
+      <div class="item-note">WS handler dispatches <code>{ type: "message", direction: "in" }</code> → <code>addMessage()</code> → <code>MessageList</code> re-renders. Auto-scrolls to bottom.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Pairing modal — initiator flow shows QR code
+      <div class="item-note">Sends <code>{ type: "initiate_pairing" }</code>. Backend returns <code>pairing_qr</code> with base64 PNG. Displayed in <code>PairingModal</code>. Labeled ephemeral.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Pairing modal — joiner flow activates camera and scans QR
+      <div class="item-note"><code>html5-qrcode</code> library dynamically imported. Camera activated on "Scan QR" selection. On decode: <code>completePairing(qrData)</code> sent.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      New contacts appear in sidebar after pairing
+      <div class="item-note"><code>pairing_complete</code> handler calls <code>addContact()</code>. Modal auto-closes after 1.2s delay.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Settings panel allows envelope template editing
+      <div class="item-note"><code>EnvelopeConfig</code> component. User edits template, clicks apply → <code>updateEnvelope(template)</code> sent. Placeholder: <code>{ciphertext}</code>.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Theme CSS variables produce warm, muted, art nouveau aesthetic
+      <div class="item-note">16 CSS variables defined in <code>app.css</code>. Theme overrides in <code>themes/art-nouveau/theme.css</code>. Loaded dynamically via link tag in layout.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      No tooltips, no onboarding, no hand-holding
+      <div class="item-note">Interface communicates through form. Contact list shows indicator dots. Compose placeholder is "write...". Pair button is "+ pair".</div>
+    </div>
+  </li>
+  <li>
+    <span class="check">✓</span>
+    <div class="item-text">
+      Frontend never touches crypto or Telegram directly
+      <div class="item-note">All operations go through <code>VeilSocket</code> → backend. No key material, no Telegram imports anywhere in frontend.</div>
+    </div>
+  </li>
+</ul>
+
+<h2>File Map</h2>
+<p class="section-desc">Complete list of files created in this phase.</p>
+<pre class="file-tree">
+frontend/
+├── <span class="acc">package.json</span>          — SvelteKit + adapter-static + html5-qrcode
+├── svelte.config.js       — adapter-static, alias $lib
+├── vite.config.ts         — sveltekit plugin
+├── tsconfig.json          — strict TypeScript
+├── static/
+│   ├── favicon.png
+│   └── themes/
+│       └── art-nouveau/
+│           └── theme.css  — symlinked from themes/art-nouveau/theme.css
+└── src/
+    ├── app.html           — HTML shell, Google Fonts (IBM Plex Sans/Mono)
+    ├── app.css            — CSS variables, reset, scrollbar styling
+    ├── routes/
+    │   ├── +layout.ts     — prerender=true, ssr=false
+    │   ├── +layout.svelte — dynamic theme CSS link, global styles
+    │   └── +page.svelte   — app shell: Sidebar + ChatView + modals
+    └── lib/
+        ├── api/
+        │   └── websocket.ts    — VeilSocket class, auto-reconnect, store dispatch
+        ├── stores/
+        │   ├── connection.ts   — connectionState, isConnected
+        │   ├── contacts.ts     — contacts[], setContacts, addContact
+        │   ├── messages.ts     — Map&lt;id, Message[]&gt;, addMessage, currentMessages
+        │   └── ui.ts           — selectedContactId, showPairingModal, showSettings, pairingRole
+        └── components/
+            ├── Sidebar.svelte        — left panel, connection badge, pair + settings buttons
+            ├── ContactList.svelte    — reactive contact list
+            ├── ContactItem.svelte    — single contact row with indicator dot
+            ├── ChatView.svelte       — right panel: header, messages, compose
+            ├── MessageList.svelte    — auto-scrolling message container
+            ├── Message.svelte        — bubble: inbound left / outbound right
+            ├── Compose.svelte        — textarea, Enter to send, shift+enter for newline
+            ├── PairingModal.svelte   — role picker → QR display or camera scanner
+            ├── SettingsPanel.svelte  — slide-in panel: envelope + theme
+            └── EnvelopeConfig.svelte — template textarea, apply button
+
+themes/
+└── art-nouveau/
+    ├── theme.json
+    └── theme.css          — CSS variable overrides + ornamental box-shadow details
+</pre>
+
+<h2>WebSocket Protocol Coverage</h2>
+<pre>
+Client → Server                          Implemented in
+─────────────────────────────────────────────────────────
+{ type: "send_message", ... }            Compose.svelte → veilSocket.sendMessage()
+{ type: "list_contacts" }                veilSocket.requestContacts()
+{ type: "initiate_pairing" }             PairingModal.svelte → veilSocket.initiatePairing()
+{ type: "complete_pairing", qr_data }    PairingModal.svelte → veilSocket.completePairing()
+{ type: "update_envelope", template }    EnvelopeConfig.svelte → veilSocket.updateEnvelope()
+{ type: "set_theme", theme_id }          SettingsPanel.svelte → veilSocket.setTheme()
+
+Server → Client                          Handled in
+─────────────────────────────────────────────────────────
+{ type: "connected" }                    connectionState.set("connected")
+{ type: "contacts", contacts: [...] }    setContacts() → contacts store
+{ type: "message", direction, text }     addMessage() → messages store
+{ type: "pairing_qr", qr_image }         PairingModal on() handler → qrImage display
+{ type: "pairing_complete", contact }    addContact() + modal close
+{ type: "error", message }               console.error (non-fatal)
+</pre>
+
+<h2>Design Decisions</h2>
+<ul class="checklist">
+  <li>
+    <span class="check warn">→</span>
+    <div class="item-text">
+      Static adapter (not Node adapter)
+      <div class="item-note">Backend serves <code>frontend/dist</code> as static files. SvelteKit SSR is disabled. This matches the existing FastAPI <code>StaticFiles</code> mount in <code>server.py</code>.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check warn">→</span>
+    <div class="item-text">
+      html5-qrcode lazy import
+      <div class="item-note">Dynamically imported inside <code>mountScanner()</code> to avoid SSR issues (it accesses <code>window</code>). Fails gracefully with a user-visible error if camera permission denied.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check warn">→</span>
+    <div class="item-text">
+      Theme CSS in static/ (not dynamic fetch from repo root)
+      <div class="item-note"><code>themes/art-nouveau/theme.css</code> is copied to <code>frontend/static/themes/</code> so it gets included in the dist build and served at <code>/themes/art-nouveau/theme.css</code>.</div>
+    </div>
+  </li>
+  <li>
+    <span class="check warn">→</span>
+    <div class="item-text">
+      Svelte 5 with legacy stores
+      <div class="item-note">Uses <code>svelte/store</code> writables (Svelte 4 API, fully supported in Svelte 5). Keeps code simple and readable.</div>
+    </div>
+  </li>
+</ul>
+
+<h2>How to Run</h2>
+<pre>
+# Start the backend (from veil/ root):
+uv run python -m veil
+
+# In a separate terminal, start frontend dev server:
+cd frontend
+npm run dev
+# → http://localhost:5173
+
+# Or build for production (served by FastAPI):
+npm run build
+# → frontend/dist/ served by FastAPI at http://localhost:8900
+</pre>
+
+</body>
+</html>
