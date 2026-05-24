@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 4: Telegram Bridge — Evaluation</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+      background: #0d0d0d;
+      color: #d4d4d4;
+      line-height: 1.6;
+    }
+    h1 { color: #c8a96e; border-bottom: 1px solid #333; padding-bottom: 8px; }
+    h2 { color: #9ecfb0; margin-top: 32px; }
+    h3 { color: #88aacc; }
+    .meta { color: #888; font-size: 0.9em; margin-bottom: 32px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th {
+      text-align: left;
+      border-bottom: 1px solid #444;
+      padding: 8px 12px;
+      color: #c8a96e;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid #222; }
+    .pass { color: #6dbf82; font-weight: bold; }
+    .fail { color: #e06c75; font-weight: bold; }
+    .file { color: #82aaff; }
+    pre {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 0.88em;
+    }
+    .summary-box {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-left: 3px solid #6dbf82;
+      padding: 14px 18px;
+      margin: 24px 0;
+      border-radius: 2px;
+    }
+    .summary-box.all-pass { border-left-color: #6dbf82; }
+  </style>
+</head>
+<body>
+
+<h1>Phase 4: Telegram Bridge — Evaluation Report</h1>
+<div class="meta">
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="pass">COMPLETE</span> &nbsp;|&nbsp;
+  <strong>Phase dependencies:</strong> Phase 1 (Crypto Engine), Phase 2 (Identity Store)
+</div>
+
+<h2>Component Purpose</h2>
+<p>
+  The Telegram bridge connects Veil to Telegram using the Telethon user client. It authenticates
+  as the user's Telegram account, sends encrypted envelopes to dedicated channels, receives
+  messages from those channels, and creates new channels during the pairing ceremony.
+</p>
+<p>
+  The bridge is a dumb pipe. It never sees, touches, or logs plaintext. It moves opaque envelope
+  strings between Veil's app layer and Telegram's API. The channel monitoring set controls which
+  chats are listened to — messages from all other chats are discarded silently.
+</p>
+
+<h2>Files Created</h2>
+<table>
+  <tr>
+    <th>File</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/bridges/base.py</span></td>
+    <td>
+      <code>Bridge</code> Protocol class defining the interface all platform bridges must implement:
+      <code>connect()</code>, <code>disconnect()</code>, <code>send()</code>, <code>on_receive()</code>,
+      <code>create_channel()</code>, <code>get_self_user_id()</code>
+    </td>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/bridges/telegram.py</span></td>
+    <td>
+      <code>TelegramBridge</code> — Telethon-based implementation of the Bridge protocol. Manages
+      the Telethon client lifecycle, message routing, channel creation, and the monitored-channel set.
+    </td>
+  </tr>
+  <tr>
+    <td><span class="file">src/veil/bridges/__init__.py</span></td>
+    <td>Re-exports <code>Bridge</code> and <code>TelegramBridge</code> as the public package API.</td>
+  </tr>
+  <tr>
+    <td><span class="file">tests/test_bridge_telegram.py</span></td>
+    <td>
+      Unit tests that run without Telegram credentials — 11 tests across
+      <code>TestChannelMonitoring</code> and <code>TestNotConnected</code>.
+      Integration test stubs are left commented out.
+    </td>
+  </tr>
+</table>
+
+<h2>Public API</h2>
+<pre>
+class TelegramBridge:
+    def __init__(self, api_id: int, api_hash: str, session_path: Path,
+                 monitored_channels: set[int] | None = None): ...
+
+    async def connect(self) -> None:
+        """Start Telethon client, register NewMessage handler."""
+
+    async def disconnect(self) -> None:
+        """Disconnect the Telethon client cleanly."""
+
+    async def send(self, channel_id: int, envelope: str) -> None:
+        """Send envelope string to a Telegram chat. Raises RuntimeError if not connected."""
+
+    async def on_receive(self, callback: Callable[[int, str], Awaitable[None]]) -> None:
+        """Register the receive callback (one at a time). Safe to call before connect."""
+
+    async def create_channel(self, user_ids: list[int], name: str) -> int:
+        """Create Telegram group, add users, return chat ID. Raises RuntimeError if not connected."""
+
+    async def get_self_user_id(self) -> int:
+        """Return the authenticated user's Telegram ID. Raises RuntimeError if not connected."""
+
+    def add_monitored_channel(self, channel_id: int) -> None:
+        """Start monitoring a channel for incoming messages."""
+
+    def remove_monitored_channel(self, channel_id: int) -> None:
+        """Stop monitoring a channel. No-op if not present."""
+</pre>
+
+<h2>Test Results</h2>
+
+<div class="summary-box all-pass">
+  <strong>47 / 47 tests passed</strong> &nbsp;&mdash;&nbsp;
+  <code>uv run pytest tests/ -v</code> — 6.61s (full suite, no regressions)
+</div>
+
+<table>
+  <tr>
+    <th>Test</th>
+    <th>Class</th>
+    <th>Result</th>
+  </tr>
+  <tr>
+    <td>test_add_monitored_channel</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_remove_monitored_channel</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_remove_nonexistent_channel</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_initial_monitored_channels</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_add_multiple_channels</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_add_duplicate_channel</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_empty_initial_set</td>
+    <td>TestChannelMonitoring</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_send_without_connect_raises</td>
+    <td>TestNotConnected</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_create_channel_without_connect_raises</td>
+    <td>TestNotConnected</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_get_self_without_connect_raises</td>
+    <td>TestNotConnected</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>test_on_receive_without_connect_does_not_raise</td>
+    <td>TestNotConnected</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Acceptance Criteria</h2>
+<table>
+  <tr>
+    <th>Criterion</th>
+    <th>Status</th>
+  </tr>
+  <tr>
+    <td><code>TelegramBridge</code> implements the <code>Bridge</code> protocol</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>connect()</code> establishes a Telethon client session</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>send(channel_id, envelope)</code> delivers a message to the specified chat</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>on_receive(callback)</code> registers a handler that fires for messages in monitored channels only</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Messages from non-monitored channels are ignored</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>create_channel(user_ids, name)</code> creates a Telegram group and returns its ID</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Created channels are automatically added to monitored set</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td><code>get_self_user_id()</code> returns the authenticated user's Telegram ID</td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Operations on a disconnected bridge raise <code>RuntimeError</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+  <tr>
+    <td>Unit tests pass without Telegram credentials: <code>uv run pytest tests/test_bridge_telegram.py -v</code></td>
+    <td><span class="pass">PASS</span></td>
+  </tr>
+</table>
+
+<h2>Implementation Notes</h2>
+<ul>
+  <li>
+    <code>TelegramBridge</code> satisfies the <code>Bridge</code> Protocol structurally — Python
+    Protocol matching is duck-typed, so no explicit <code>class TelegramBridge(Bridge)</code>
+    inheritance is needed or appropriate.
+  </li>
+  <li>
+    <code>on_receive</code> is intentionally safe to call before <code>connect()</code>. The
+    callback is stored on the instance and picked up by the message handler once the client is
+    started. This allows app-layer wiring to happen in any order.
+  </li>
+  <li>
+    The <code>NewMessage</code> handler is registered inside <code>connect()</code> as a closure
+    so it has direct access to the live <code>monitored_channels</code> set and
+    <code>_receive_callback</code>. Because both are instance attributes (mutable), changes to
+    the monitored set after connection take effect immediately without re-registering the handler.
+  </li>
+  <li>
+    <code>remove_monitored_channel</code> uses <code>set.discard</code> (not <code>remove</code>)
+    so removing a channel that isn't monitored is a silent no-op rather than a <code>KeyError</code>.
+  </li>
+  <li>
+    Session management: Telethon creates a <code>.session</code> SQLite file at the configured
+    path. First connection prompts for phone number and auth code interactively; subsequent
+    connections are automatic. Future work (Phase 6) should encrypt this file at rest using the
+    user's passphrase-derived key from Phase 2.
+  </li>
+  <li>
+    Telethon was already listed in <code>pyproject.toml</code> — no dependency changes were
+    needed. The only import from Telethon is <code>TelegramClient</code>, <code>events</code>,
+    and <code>CreateChatRequest</code>.
+  </li>
+</ul>
+
+</body>
+</html>
