@@ -1,2 +1,5 @@
-// Crypto engine — Phase 2
-// XSalsa20-Poly1305 encrypt/decrypt via sodiumoxide
+pub mod engine;
+pub mod keys;
+
+pub use engine::{decrypt, encrypt, CryptoError};
+pub use keys::{generate_key, key_from_base64, key_to_base64, KeyError, KEY_SIZE};

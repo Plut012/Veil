@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Veil — Phase 2: Crypto Engine Eval</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #0d0d0d;
+      color: #c8c8c8;
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { color: #e8d5b0; margin-bottom: 0.25rem; }
+    h2 { color: #a89070; border-bottom: 1px solid #333; padding-bottom: 0.25rem; margin-top: 2rem; }
+    h3 { color: #8a7060; }
+    .meta { color: #555; font-size: 0.85rem; margin-bottom: 2rem; }
+    .pass { color: #5faf5f; }
+    .fail { color: #af5f5f; }
+    .section { margin-bottom: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; }
+    th { text-align: left; color: #a89070; border-bottom: 1px solid #444; padding: 0.4rem 0.6rem; }
+    td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #222; }
+    td:first-child { color: #d4c0a0; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.8rem; }
+    .badge-pass { background: #1a3a1a; color: #5faf5f; }
+    .badge-na { background: #2a2a2a; color: #666; }
+    pre {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      color: #b0c8b0;
+    }
+    .summary-box {
+      background: #111;
+      border: 1px solid #2a3a2a;
+      border-radius: 4px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .summary-box p { margin: 0.25rem 0; }
+  </style>
+</head>
+<body>
+
+<h1>Veil — Phase 2: Crypto Engine</h1>
+<div class="meta">Eval generated: 2026-05-24 &nbsp;|&nbsp; Branch: tauri &nbsp;|&nbsp; Status: <span class="pass">COMPLETE</span></div>
+
+<div class="summary-box">
+  <p><strong>Scope:</strong> Rust crypto engine — XSalsa20-Poly1305 encrypt/decrypt and key management.</p>
+  <p><strong>Files added:</strong> <code>src-tauri/src/crypto/engine.rs</code>, <code>src-tauri/src/crypto/keys.rs</code>, <code>src-tauri/src/crypto/mod.rs</code> (replaced stub).</p>
+  <p><strong>Tests:</strong> 12 new tests, all passing. 23 total tests in crate (0 failures).</p>
+</div>
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <thead>
+    <tr><th>Criterion</th><th>Status</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>encrypt(plaintext, key)</code> returns sealed bytes (nonce + ciphertext + MAC)</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td>Format: 24-byte nonce prepended to <code>secretbox::seal()</code> output</td>
+    </tr>
+    <tr>
+      <td><code>decrypt(sealed, key)</code> returns original plaintext</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td>Roundtrip verified for non-empty and empty messages</td>
+    </tr>
+    <tr>
+      <td>Wrong key returns <code>Err(CryptoError::DecryptionFailed)</code></td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_wrong_key_fails</code></td>
+    </tr>
+    <tr>
+      <td>Tampered ciphertext returns error</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_tampered_ciphertext_fails</code> — single-byte flip detected by Poly1305 MAC</td>
+    </tr>
+    <tr>
+      <td>Truncated ciphertext returns <code>Err(CryptoError::InvalidLength)</code></td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_truncated_ciphertext_fails</code></td>
+    </tr>
+    <tr>
+      <td>Each encryption produces different output (random nonce)</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_unique_nonces</code> — two encryptions of same plaintext differ</td>
+    </tr>
+    <tr>
+      <td>Sealed format size is 24 + plaintext_len + 16</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_sealed_format_size</code></td>
+    </tr>
+    <tr>
+      <td><code>generate_key()</code> returns 32 random bytes</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_key_length</code></td>
+    </tr>
+    <tr>
+      <td>Generated keys are unique</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_keys_are_unique</code></td>
+    </tr>
+    <tr>
+      <td>Keys roundtrip through base64 encoding</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_key_base64_roundtrip</code> — URL-safe base64, no data loss</td>
+    </tr>
+    <tr>
+      <td>Invalid base64 rejected</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_invalid_base64_rejected</code> — returns <code>Err(KeyError::InvalidBase64)</code></td>
+    </tr>
+    <tr>
+      <td>Invalid key length rejected</td>
+      <td><span class="badge badge-pass">PASS</span></td>
+      <td><code>test_invalid_key_length_rejected</code> — 16-byte input returns <code>Err(KeyError::InvalidLength)</code></td>
+    </tr>
+    <tr>
+      <td>Ciphertext format compatible with PyNaCl</td>
+      <td><span class="badge badge-na">NOTED</span></td>
+      <td>Same libsodium under the hood. Format is <code>nonce||ciphertext+MAC</code> — matches PyNaCl <code>SecretBox.encrypt()</code>. Cross-language vector test deferred to integration phase.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Test Results</h2>
+
+<pre>running 23 tests
+test crypto::engine::tests::test_empty_message_roundtrip ... ok
+test crypto::engine::tests::test_roundtrip ... ok
+test crypto::engine::tests::test_sealed_format_size ... ok
+test crypto::engine::tests::test_truncated_ciphertext_fails ... ok
+test crypto::engine::tests::test_wrong_key_fails ... ok
+test crypto::keys::tests::test_invalid_base64_rejected ... ok
+test crypto::engine::tests::test_tampered_ciphertext_fails ... ok
+test crypto::keys::tests::test_invalid_key_length_rejected ... ok
+test crypto::engine::tests::test_unique_nonces ... ok
+test crypto::keys::tests::test_key_length ... ok
+test crypto::keys::tests::test_key_base64_roundtrip ... ok
+test crypto::keys::tests::test_keys_are_unique ... ok
+test envelope::format::tests::test_emoji_template_wrap ... ok
+test envelope::format::tests::test_wrap_prefix_template ... ok
+test envelope::format::tests::test_wrap_simple ... ok
+test envelope::format::tests::test_wrap_empty_template ... ok
+test envelope::format::tests::test_unwrap_empty_template_raw_ciphertext ... ok
+test envelope::format::tests::test_unwrap_no_match_returns_none ... ok
+test envelope::format::tests::test_unwrap_match ... ok
+test envelope::format::tests::test_emoji_template_unwrap ... ok
+test envelope::format::tests::test_regex_special_chars_in_template ... ok
+test envelope::format::tests::test_roundtrip ... ok
+test envelope::format::tests::test_unwrap_multiple_templates_first_match_wins ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out</pre>
+
+<h2>Implementation Details</h2>
+
+<h3>engine.rs — Sealed Format</h3>
+<p>
+  <code>secretbox::seal()</code> returns <code>ciphertext+MAC</code> with no nonce.
+  The nonce is generated fresh per call via <code>secretbox::gen_nonce()</code> and prepended manually.
+  <code>secretbox::open()</code> receives only the ciphertext+MAC slice (bytes 24..end).
+</p>
+
+<h3>Error Handling</h3>
+<p>
+  No <code>unwrap()</code> in library code. <code>CryptoError</code> and <code>KeyError</code> both use <code>thiserror::Error</code>.
+  The only <code>expect()</code> calls are on invariants that the type system guarantees (e.g., constructing a <code>secretbox::Key</code>
+  from a <code>&amp;[u8; 32]</code> — that slice length is enforced by the type).
+</p>
+
+<h3>sodiumoxide::init()</h3>
+<p>
+  Called in every test's <code>init()</code> helper. Safe to call multiple times. Should also be called at app startup
+  (in <code>main()</code>) before any crypto operations are performed in production.
+</p>
+
+<h3>Public API (re-exported from mod.rs)</h3>
+<pre>pub fn encrypt(plaintext: &amp;[u8], key: &amp;[u8; 32]) -&gt; Vec&lt;u8&gt;
+pub fn decrypt(sealed: &amp;[u8], key: &amp;[u8; 32]) -&gt; Result&lt;Vec&lt;u8&gt;, CryptoError&gt;
+pub fn generate_key() -&gt; [u8; 32]
+pub fn key_to_base64(key: &amp;[u8; 32]) -&gt; String
+pub fn key_from_base64(encoded: &amp;str) -&gt; Result&lt;[u8; 32], KeyError&gt;
+pub const KEY_SIZE: usize = 32;</pre>
+
+</body>
+</html>
