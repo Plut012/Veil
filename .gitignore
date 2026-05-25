@@ -10,5 +10,6 @@ frontend/dist/
 
 .env
 *.session
+*.session-journal
 *.enc
 .veil/
