@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tauri Phase 3 Evaluation — Envelope</title>
+  <style>
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0f0f14;
+      color: #d4c8e8;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1 { color: #c084fc; border-bottom: 1px solid #3b1f5e; padding-bottom: 0.5rem; }
+    h2 { color: #a855f7; margin-top: 2rem; }
+    h3 { color: #9333ea; }
+    .status-badge {
+      display: inline-block;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .pass { background: #14532d; color: #86efac; }
+    .fail { background: #450a0a; color: #fca5a5; }
+    .warn { background: #451a03; color: #fdba74; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th {
+      background: #1e1030;
+      color: #c084fc;
+      padding: 0.6rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #3b1f5e;
+    }
+    td {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid #1e1030;
+    }
+    tr:hover td { background: #16102a; }
+    code {
+      background: #1e1030;
+      color: #e879f9;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    pre {
+      background: #1e1030;
+      border: 1px solid #3b1f5e;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+    }
+    .criterion { margin: 0.5rem 0; display: flex; align-items: flex-start; gap: 0.75rem; }
+    .criterion .check { font-size: 1.2rem; flex-shrink: 0; }
+    .note { background: #1a0a2e; border-left: 3px solid #7c3aed; padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+    .section { background: #13101e; border: 1px solid #2a1a4a; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+
+<h1>Tauri Phase 3 — Envelope Evaluation</h1>
+<p>
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Branch:</strong> <code>tauri</code> &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="status-badge pass">COMPLETE</span>
+</p>
+
+<div class="section">
+  <h2>Acceptance Criteria</h2>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>wrap(ciphertext, template)</code> substitutes placeholder and returns formatted string.</strong>
+      Replaces <code>{ciphertext}</code> in the template with the base64 payload.
+      Tested with simple, prefix, and emoji templates.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Empty template returns raw ciphertext.</strong>
+      When <code>template</code> is <code>""</code>, <code>wrap</code> returns the ciphertext unchanged.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>unwrap(message, templates)</code> extracts ciphertext from first matching template.</strong>
+      Iterates templates, returns the captured group from the first match.
+      Verified with multiple-template case where first match wins.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>unwrap</code> returns <code>None</code> for non-Veil messages.</strong>
+      A plain <code>"Hello world"</code> message against a known template returns <code>None</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Templates with special regex characters work correctly.</strong>
+      Template <code>[msg]{ciphertext}...done</code> contains brackets and dots (regex metacharacters).
+      <code>regex::escape()</code> is applied to template parts before joining, so these are matched literally.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>cargo test</code> passes all envelope tests.</strong>
+      11 tests run, 11 passed, 0 failed.
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Test Results</h2>
+  <pre>$ cd src-tauri && cargo test envelope
+   Compiling veil v0.1.0 (/data/dev/veil/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.52s
+     Running unittests src/lib.rs (target/debug/deps/veil_lib-9083706c4ed932f9)
+
+running 11 tests
+test envelope::format::tests::test_emoji_template_wrap ... ok
+test envelope::format::tests::test_wrap_empty_template ... ok
+test envelope::format::tests::test_wrap_prefix_template ... ok
+test envelope::format::tests::test_wrap_simple ... ok
+test envelope::format::tests::test_unwrap_empty_template_raw_ciphertext ... ok
+test envelope::format::tests::test_regex_special_chars_in_template ... ok
+test envelope::format::tests::test_unwrap_no_match_returns_none ... ok
+test envelope::format::tests::test_emoji_template_unwrap ... ok
+test envelope::format::tests::test_unwrap_match ... ok
+test envelope::format::tests::test_unwrap_multiple_templates_first_match_wins ... ok
+test envelope::format::tests::test_roundtrip ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s</pre>
+</div>
+
+<div class="section">
+  <h2>Test Cases Detail</h2>
+
+  <table>
+    <tr>
+      <th>Test</th>
+      <th>What It Verifies</th>
+      <th>Result</th>
+    </tr>
+    <tr>
+      <td><code>test_wrap_simple</code></td>
+      <td>Basic placeholder substitution: <code>"Encrypted: {ciphertext}"</code></td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_wrap_prefix_template</code></td>
+      <td>Template with surrounding markers: <code>"[veil]{ciphertext}[/veil]"</code></td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_wrap_empty_template</code></td>
+      <td>Empty template returns raw ciphertext unchanged</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_unwrap_match</code></td>
+      <td>Extracts ciphertext from a matching message</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_unwrap_no_match_returns_none</code></td>
+      <td>Non-Veil message returns <code>None</code></td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_unwrap_multiple_templates_first_match_wins</code></td>
+      <td>First matching template is used when multiple are provided</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_emoji_template_wrap</code></td>
+      <td>Multibyte Unicode in template: <code>"&#x1F512; {ciphertext} &#x1F512;"</code></td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_emoji_template_unwrap</code></td>
+      <td>Extracts ciphertext from emoji-wrapped message</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_roundtrip</code></td>
+      <td>wrap then unwrap recovers original ciphertext (including <code>+/=</code> chars)</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_regex_special_chars_in_template</code></td>
+      <td>Brackets <code>[</code> <code>]</code> and dots <code>.</code> in template are escaped and matched literally</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>test_unwrap_empty_template_raw_ciphertext</code></td>
+      <td>Empty template pattern anchored as <code>^([A-Za-z0-9_\-=+/]+)$</code> matches bare ciphertext</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>Implementation Notes</h2>
+  <ul>
+    <li>
+      <strong>No <code>unwrap()</code> in library code.</strong> Both <code>Regex::new()</code> calls use <code>.expect()</code> with a descriptive message instead. The hardcoded empty-template pattern is guaranteed valid; the generated pattern is valid because <code>regex::escape()</code> sanitizes all user input before joining with the literal capture group string.
+    </li>
+    <li>
+      <strong><code>regex::escape()</code> applied to template parts only.</strong> The placeholder <code>{ciphertext}</code> is used as a split point, never passed to the regex engine. This is the correct approach — template literal text could contain any regex metacharacter.
+    </li>
+    <li>
+      <strong>Empty template anchored pattern.</strong> <code>^([A-Za-z0-9_\-=+/]+)$</code> ensures the entire message is a valid base64 payload with no surrounding text, preventing false positives.
+    </li>
+    <li>
+      <strong>Base64 character class.</strong> The capture group <code>[A-Za-z0-9_\-=+/]+</code> covers standard base64 (<code>+/=</code>) and URL-safe base64 (<code>-_</code>), matching the output of the crypto engine regardless of encoding variant chosen in Phase 2.
+    </li>
+    <li>
+      <strong><code>regex</code> crate was already in <code>Cargo.toml</code></strong> from Phase 1 dependency declarations. No Cargo.toml changes were needed.
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>Files Created</h2>
+  <pre>src-tauri/src/envelope/
+  format.rs   — wrap(), build_pattern(), unwrap() + 11 inline tests
+  mod.rs      — pub use format::{wrap, unwrap}</pre>
+</div>
+
+</body>
+</html>

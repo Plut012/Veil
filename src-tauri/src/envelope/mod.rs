@@ -1,2 +1,2 @@
-// Envelope format — Phase 3
-// Wrap/unwrap encrypted payloads
+pub mod format;
+pub use format::{wrap, unwrap};
