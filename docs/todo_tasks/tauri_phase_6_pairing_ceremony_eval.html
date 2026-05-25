@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 6 Eval: Pairing Ceremony</title>
+  <style>
+    body { font-family: monospace; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #0d1117; color: #c9d1d9; }
+    h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+    h2 { color: #79c0ff; margin-top: 2rem; }
+    .pass { color: #3fb950; }
+    .fail { color: #f85149; }
+    .note { color: #8b949e; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #30363d; padding: 0.5rem 1rem; text-align: left; }
+    th { background: #161b22; color: #79c0ff; }
+    tr:nth-child(even) { background: #161b22; }
+    code { background: #161b22; padding: 0.1rem 0.3rem; border-radius: 3px; color: #e6edf3; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; border: 1px solid #30363d; }
+    .section { margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Phase 6 Eval: Pairing Ceremony</h1>
+  <p class="note">Evaluated: 2026-05-24 | qrcode 0.14 | image 0.25 | sodiumoxide 0.2</p>
+
+  <h2>Acceptance Criteria</h2>
+  <table>
+    <tr><th>Criterion</th><th>Status</th><th>Notes</th></tr>
+    <tr>
+      <td><code>create_qr_payload</code> generates key and returns valid PNG bytes</td>
+      <td class="pass">PASS</td>
+      <td>Uses <code>qrcode::QrCode::new</code> + <code>image::DynamicImage::ImageLuma8</code> + <code>write_to(Cursor, Png)</code></td>
+    </tr>
+    <tr>
+      <td><code>parse_qr_payload</code> extracts key, user ID, display name, envelope template</td>
+      <td class="pass">PASS</td>
+      <td>Deserializes <code>QrPayloadJson</code>, validates <code>v == 1</code>, decodes key via <code>key_from_base64</code></td>
+    </tr>
+    <tr>
+      <td>QR payload roundtrips (create → serialize → parse)</td>
+      <td class="pass">PASS</td>
+      <td><code>test_qr_payload_roundtrip</code>: key, user ID, name, env all preserved</td>
+    </tr>
+    <tr>
+      <td>Invalid protocol version rejected</td>
+      <td class="pass">PASS</td>
+      <td><code>test_invalid_version_rejected</code>: v=99 returns <code>PairingError::UnsupportedVersion(99)</code></td>
+    </tr>
+    <tr>
+      <td>Missing fields rejected</td>
+      <td class="pass">PASS</td>
+      <td><code>test_missing_fields_rejected</code> and <code>test_invalid_json_rejected</code> both return <code>PairingError::InvalidQr</code></td>
+    </tr>
+    <tr>
+      <td><code>build_handshake_message</code> produces encrypted base64 message</td>
+      <td class="pass">PASS</td>
+      <td>Serializes <code>HandshakeJson</code>, encrypts with shared key, URL-safe base64 encodes</td>
+    </tr>
+    <tr>
+      <td><code>parse_handshake_message</code> decrypts and validates</td>
+      <td class="pass">PASS</td>
+      <td><code>test_handshake_roundtrip</code>: name and env fields correctly round-trip</td>
+    </tr>
+    <tr>
+      <td>Wrong key returns <code>None</code> (no panic)</td>
+      <td class="pass">PASS</td>
+      <td><code>test_wrong_key_returns_none</code>: decrypt fails, propagated via <code>.ok()?</code></td>
+    </tr>
+    <tr>
+      <td>Non-handshake messages return <code>None</code></td>
+      <td class="pass">PASS</td>
+      <td><code>test_non_handshake_message_returns_none</code>: <code>type != "veil_handshake"</code> triggers early return</td>
+    </tr>
+    <tr>
+      <td>QR JSON format compatible with Python version</td>
+      <td class="pass">PASS</td>
+      <td>Fields <code>v</code>, <code>key</code>, <code>tid</code>, <code>name</code>, <code>env</code> match the Python pairing implementation</td>
+    </tr>
+    <tr>
+      <td><code>cargo test</code> passes all pairing tests</td>
+      <td class="pass">PASS</td>
+      <td>9 new pairing tests + 42 pre-existing = 51 total, all passing</td>
+    </tr>
+  </table>
+
+  <h2>Design Decisions</h2>
+  <div class="section">
+    <table>
+      <tr><th>Decision</th><th>Rationale</th></tr>
+      <tr>
+        <td><code>create_qr_payload</code> returns <code>Result</code> instead of bare tuple</td>
+        <td>QR generation and PNG encoding are fallible. Using <code>unwrap()</code> in library code violates project rules. <code>PairingError::QrGeneration</code> and <code>PairingError::Internal</code> variants cover these paths.</td>
+      </tr>
+      <tr>
+        <td><code>HandshakeJson</code> uses <code>#[serde(rename = "type")]</code></td>
+        <td><code>type</code> is a reserved keyword in Rust. <code>#[serde(rename = "type")]</code> is cleaner than the raw identifier <code>r#type</code> inside the struct body and avoids visual noise throughout the code.</td>
+      </tr>
+      <tr>
+        <td>Public <code>HandshakeData</code> struct vs. returning <code>HandshakeJson</code></td>
+        <td>Internal serde structs should stay private. <code>HandshakeData</code> exposes only the meaningful fields (<code>name</code>, <code>env</code>) without leaking the internal <code>type</code> field to callers.</td>
+      </tr>
+      <tr>
+        <td><code>parse_handshake_message</code> returns <code>Option</code>, not <code>Result</code></td>
+        <td>As specified: any failure (wrong key, bad base64, wrong type, malformed JSON) is treated identically from the caller's perspective — the message is not a valid handshake. <code>Option</code> cleanly communicates this without exposing error variants the caller cannot act on differently.</td>
+      </tr>
+      <tr>
+        <td>URL_SAFE base64 throughout</td>
+        <td>Consistent with <code>crypto/keys.rs</code> and the Python implementation. Safe for transmission in Telegram messages without escaping.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>Files Created</h2>
+  <pre>
+src-tauri/src/identity/pairing.rs   — QrPayload, HandshakeData, create_qr_payload,
+                                       parse_qr_payload, build_handshake_message,
+                                       parse_handshake_message, PairingError + 9 tests
+  </pre>
+
+  <h2>Test Output</h2>
+  <pre>
+running 51 tests
+test identity::pairing::tests::test_garbage_input_returns_none ... ok
+test identity::pairing::tests::test_handshake_roundtrip ... ok
+test identity::pairing::tests::test_invalid_json_rejected ... ok
+test identity::pairing::tests::test_invalid_version_rejected ... ok
+test identity::pairing::tests::test_missing_fields_rejected ... ok
+test identity::pairing::tests::test_non_handshake_message_returns_none ... ok
+test identity::pairing::tests::test_qr_payload_roundtrip ... ok
+test identity::pairing::tests::test_qr_produces_valid_png ... ok
+test identity::pairing::tests::test_wrong_key_returns_none ... ok
+[... 42 pre-existing tests ...]
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+  </pre>
+
+  <h2>Public API Summary</h2>
+  <pre>
+pub struct QrPayload {
+    pub key: [u8; 32],
+    pub telegram_user_id: i64,
+    pub display_name: String,
+    pub envelope_template: String,
+}
+
+pub struct HandshakeData {
+    pub name: String,
+    pub env: String,
+}
+
+pub fn create_qr_payload(
+    telegram_user_id: i64,
+    display_name: &str,
+    envelope_template: &str,
+) -> Result&lt;(QrPayload, Vec&lt;u8&gt;), PairingError&gt;
+
+pub fn parse_qr_payload(qr_data: &str) -> Result&lt;QrPayload, PairingError&gt;
+
+pub fn build_handshake_message(
+    key: &[u8; 32],
+    display_name: &str,
+    envelope_template: &str,
+) -> Result&lt;String, PairingError&gt;
+
+pub fn parse_handshake_message(message: &str, key: &[u8; 32]) -> Option&lt;HandshakeData&gt;
+
+pub enum PairingError {
+    InvalidQr(String),
+    UnsupportedVersion(u32),
+    QrGeneration(String),
+    Internal(String),
+}
+  </pre>
+</body>
+</html>
