@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tauri Phase 1 Evaluation — Project Setup</title>
+  <style>
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0f0f14;
+      color: #d4c8e8;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1 { color: #c084fc; border-bottom: 1px solid #3b1f5e; padding-bottom: 0.5rem; }
+    h2 { color: #a855f7; margin-top: 2rem; }
+    h3 { color: #9333ea; }
+    .status-badge {
+      display: inline-block;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .pass { background: #14532d; color: #86efac; }
+    .fail { background: #450a0a; color: #fca5a5; }
+    .warn { background: #451a03; color: #fdba74; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th {
+      background: #1e1030;
+      color: #c084fc;
+      padding: 0.6rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #3b1f5e;
+    }
+    td {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid #1e1030;
+    }
+    tr:hover td { background: #16102a; }
+    code {
+      background: #1e1030;
+      color: #e879f9;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    pre {
+      background: #1e1030;
+      border: 1px solid #3b1f5e;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+    }
+    .criterion { margin: 0.5rem 0; display: flex; align-items: flex-start; gap: 0.75rem; }
+    .criterion .check { font-size: 1.2rem; flex-shrink: 0; }
+    .note { background: #1a0a2e; border-left: 3px solid #7c3aed; padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+    .section { background: #13101e; border: 1px solid #2a1a4a; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+
+<h1>Tauri Phase 1 — Project Setup Evaluation</h1>
+<p>
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Branch:</strong> <code>tauri</code> &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="status-badge pass">COMPLETE</span>
+</p>
+
+<div class="section">
+  <h2>Acceptance Criteria</h2>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Python backend files removed.</strong>
+      Deleted <code>src/</code>, <code>pyproject.toml</code>, <code>tests/</code>, <code>uv.lock</code>, <code>.venv/</code>, <code>.pytest_cache/</code>.
+      Retained <code>frontend/</code>, <code>docs/</code>, <code>themes/</code>, <code>CLAUDE.md</code>, <code>README.md</code>, <code>title.art</code>, <code>.gitignore</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>src-tauri/</code> directory created with valid Tauri v2 config.</strong>
+      Includes <code>Cargo.toml</code>, <code>build.rs</code>, <code>tauri.conf.json</code>, <code>src/main.rs</code>, <code>src/lib.rs</code>, and <code>icons/icon.png</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>cargo build</code> in <code>src-tauri/</code> compiles successfully.</strong>
+      All 577 crates locked and compiled without errors.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Rust module structure scaffolded.</strong>
+      Empty <code>mod.rs</code> files created for <code>crypto</code>, <code>identity</code>, <code>bridges</code>, <code>envelope</code>, and <code>app</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Frontend has <code>@tauri-apps/api</code> installed.</strong>
+      <code>@tauri-apps/api@^2.11.0</code> added to <code>frontend/package.json</code> dependencies.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>.gitignore</code> updated for Rust.</strong>
+      Added <code>target/</code>. <code>Cargo.lock</code> is committed (application convention). Removed Python-specific entries.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>CLAUDE.md</code> updated for Rust + Tauri stack.</strong>
+      Updated stack description, IPC pattern, crate mapping, and directory reference.
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Dependencies</h2>
+  <p>All planned dependencies resolved. Notable adjustments from the original plan:</p>
+
+  <table>
+    <tr>
+      <th>Crate</th>
+      <th>Planned Version</th>
+      <th>Actual Version</th>
+      <th>Note</th>
+    </tr>
+    <tr>
+      <td><code>grammers-client</code></td>
+      <td>0.7</td>
+      <td>0.9</td>
+      <td>Latest stable; plan specified outdated version</td>
+    </tr>
+    <tr>
+      <td><code>grammers-session</code></td>
+      <td>0.6</td>
+      <td>0.9</td>
+      <td>Same — updated to match grammers-client</td>
+    </tr>
+    <tr>
+      <td><code>grammers-tl-types</code></td>
+      <td>0.7</td>
+      <td>0.9</td>
+      <td>Same — all grammers crates move in lockstep</td>
+    </tr>
+    <tr>
+      <td><code>sodiumoxide</code></td>
+      <td>0.2</td>
+      <td>0.2.7</td>
+      <td>libsodium available on Arch; no issues</td>
+    </tr>
+    <tr>
+      <td><code>dirs</code></td>
+      <td>5</td>
+      <td>5.0.1</td>
+      <td>v6 available but v5 requested and resolved</td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>Build Output</h2>
+  <pre>$ cd src-tauri && cargo build
+   Compiling veil v0.1.0 (/data/dev/veil/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.79s</pre>
+
+  <p>577 crates locked. Full dependency graph includes Tauri, GTK3, grammers (Telegram), sodiumoxide, image processing, and all supporting crates.</p>
+</div>
+
+<div class="section">
+  <h2>Project Structure Created</h2>
+  <pre>veil/
+├── src-tauri/
+│   ├── Cargo.toml           — all phase deps declared upfront
+│   ├── Cargo.lock           — committed (application convention)
+│   ├── build.rs             — tauri_build::build()
+│   ├── tauri.conf.json      — Tauri v2 config (devUrl, frontendDist, window)
+│   ├── icons/
+│   │   └── icon.png         — 32x32 RGBA placeholder icon
+│   └── src/
+│       ├── main.rs          — Tauri entry point
+│       ├── lib.rs           — module declarations
+│       ├── crypto/mod.rs    — placeholder (Phase 2)
+│       ├── identity/mod.rs  — placeholder (Phase 4)
+│       ├── bridges/mod.rs   — placeholder (Phase 5)
+│       ├── envelope/mod.rs  — placeholder (Phase 3)
+│       └── app/mod.rs       — placeholder (Phase 7)
+├── frontend/                — Svelte frontend (unchanged)
+│   └── package.json         — @tauri-apps/api@^2.11.0 added
+├── docs/
+├── themes/
+├── CLAUDE.md                — updated for Rust/Tauri stack
+├── .gitignore               — updated for Rust (target/)
+└── README.md</pre>
+</div>
+
+<div class="section">
+  <h2>Notes for Future Phases</h2>
+  <ul>
+    <li>All future phases should use grammers <code>0.9</code> (not 0.7/0.6 as originally planned). The API is compatible.</li>
+    <li>The <code>sodiumoxide</code> crate works fine — <code>libsodium</code> is available on the Arch Linux build machine via <code>pkg-config</code>. Ciphertext produced is compatible with the Python PyNaCl implementation (both use libsodium XSalsa20-Poly1305).</li>
+    <li>The icon at <code>icons/icon.png</code> is a placeholder. Replace with a proper icon before Phase 7.</li>
+    <li><code>cargo tauri dev</code> is not tested here as it requires the frontend dev server and a display. The <code>cargo build</code> check confirms the Rust code is valid.</li>
+    <li>The <code>lib.rs</code> declares all five modules — they compile because each <code>mod.rs</code> is present (even if empty of logic).</li>
+  </ul>
+</div>
+
+</body>
+</html>

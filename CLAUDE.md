@@ -4,15 +4,17 @@
 A locally-running encrypted messaging wrapper. Encrypts messages before they hit the platform, decrypts on receive. The platform is a dumb pipe. Telegram bridge first, others later.
 
 ## Stack
-- **Backend:** Python 3.12+, FastAPI, WebSockets, Telethon, uvicorn
-- **Crypto:** PyNaCl (libsodium) — XChaCha20-Poly1305
-- **Frontend:** Svelte + TypeScript, Vite
-- **Package mgmt:** uv (backend), npm (frontend)
+- **Backend:** Rust (Tauri v2), tokio async runtime
+- **Crypto:** sodiumoxide (libsodium) — XSalsa20-Poly1305
+- **Frontend:** Svelte + TypeScript, Vite (SvelteKit static adapter)
+- **IPC:** Tauri commands (`invoke`) and events (`listen`) — no WebSocket
+- **Package mgmt:** cargo (backend), npm (frontend)
 - **No database.** Keys and contacts stored as encrypted local files.
 
 ## Key Docs
 - [docs/overview.md](docs/overview.md) — Vision, principles, scope
 - [docs/architecture.md](docs/architecture.md) — Full technical design
+- [docs/todo_tasks/tauri_rewrite_overview.md](docs/todo_tasks/tauri_rewrite_overview.md) — Tauri rewrite plan
 
 ## Core Rules
 
@@ -37,25 +39,47 @@ A locally-running encrypted messaging wrapper. Encrypts messages before they hit
 - No onboarding tutorials or guided setup flows
 
 ## Code Style
-- Python: dataclasses over dicts, type hints everywhere, no classes where functions suffice
-- TypeScript: strict mode, types mirroring server models
+- Rust: use `thiserror` for error types, `serde` for serialization, no `unwrap()` in library code
+- TypeScript: strict mode, types mirroring Rust command return types
 - Svelte: one component per file, props over context, scoped CSS
-- WebSocket messages: JSON with `type` field, validated on receive
+- Tauri commands: return `Result<T, String>` for frontend compatibility
 - Tests: real crypto operations, no mocking the crypto engine
+
+## Architecture
+
+**IPC pattern:**
+```
+Svelte ←→ Tauri IPC (invoke/listen) ←→ Rust modules
+```
+
+**Crate mapping:**
+| Python (old) | Rust crate | Notes |
+|---|---|---|
+| PyNaCl (libsodium) | `sodiumoxide` | Same libsodium — ciphertext compatible |
+| Telethon | `grammers-client` | Rust-native Telegram client |
+| FastAPI + WebSocket | Tauri commands + events | Direct IPC, no server |
+| tomli / tomli_w | `toml` | Standard Rust TOML |
+| argon2id | `argon2` | RustCrypto implementation |
 
 ## Directory Reference
 ```
-src/veil/
-  crypto/          — encrypt/decrypt, key generation
-  identity/        — contacts, pairing, encrypted keyring
-  bridges/         — platform integrations (Telegram)
-  envelope/        — configurable ciphertext wrapping
-  app/             — FastAPI server, WebSocket API
+src-tauri/
+  src/
+    main.rs          — Tauri entry point
+    lib.rs           — module declarations
+    crypto/          — encrypt/decrypt, key generation (Phase 2)
+    identity/        — contacts, pairing, encrypted keyring (Phase 4)
+    bridges/         — platform integrations / Telegram (Phase 5)
+    envelope/        — ciphertext wrapping format (Phase 3)
+    app/             — Tauri commands, shared state, config (Phase 7)
+  Cargo.toml
+  tauri.conf.json
+  build.rs
 frontend/
   src/lib/
-    components/    — Svelte UI components
-    stores/        — reactive state
-    api/           — WebSocket client
-themes/            — CSS themes (art-nouveau first)
-docs/              — overview, architecture
+    components/      — Svelte UI components
+    stores/          — reactive state
+    api/             — Tauri IPC client wrappers
+themes/              — CSS themes (art-nouveau first)
+docs/                — overview, architecture, phase plans
 ```

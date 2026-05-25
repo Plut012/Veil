@@ -1,13 +1,11 @@
-__pycache__/
-*.pyc
-.venv/
-*.egg-info/
-dist/
-build/
+# Rust
+target/
 
+# Node
 node_modules/
 frontend/dist/
 
+# Environment
 .env
 *.session
 *.session-journal
