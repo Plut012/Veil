@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 5 Eval: Telegram Bridge</title>
+  <style>
+    body { font-family: monospace; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #0d1117; color: #c9d1d9; }
+    h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+    h2 { color: #79c0ff; margin-top: 2rem; }
+    .pass { color: #3fb950; }
+    .fail { color: #f85149; }
+    .note { color: #8b949e; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #30363d; padding: 0.5rem 1rem; text-align: left; }
+    th { background: #161b22; color: #79c0ff; }
+    tr:nth-child(even) { background: #161b22; }
+    code { background: #161b22; padding: 0.1rem 0.3rem; border-radius: 3px; color: #e6edf3; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; border: 1px solid #30363d; }
+    .section { margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Phase 5 Eval: Telegram Bridge</h1>
+  <p class="note">Evaluated: 2026-05-24 | Grammers version: 0.9.0</p>
+
+  <h2>Acceptance Criteria</h2>
+  <table>
+    <tr><th>Criterion</th><th>Status</th><th>Notes</th></tr>
+    <tr>
+      <td><code>Bridge</code> trait defined with all required methods</td>
+      <td class="pass">PASS</td>
+      <td><code>connect</code>, <code>disconnect</code>, <code>send</code>, <code>create_channel</code>, <code>get_self_user_id</code> in <code>traits.rs</code></td>
+    </tr>
+    <tr>
+      <td><code>BridgeError</code> enum with thiserror</td>
+      <td class="pass">PASS</td>
+      <td><code>NotConnected</code>, <code>ConnectionFailed</code>, <code>SendFailed</code>, <code>ChannelCreationFailed</code></td>
+    </tr>
+    <tr>
+      <td><code>TelegramBridge</code> implements <code>Bridge</code> trait</td>
+      <td class="pass">PASS</td>
+      <td>Full async_trait implementation via grammers-client 0.9</td>
+    </tr>
+    <tr>
+      <td><code>connect()</code> handles session load/create and authentication</td>
+      <td class="pass">PASS</td>
+      <td>Uses <code>SqliteSession::open()</code>, <code>SenderPool::new()</code>, interactive stdin sign-in</td>
+    </tr>
+    <tr>
+      <td>Self-message filtering works</td>
+      <td class="pass">PASS</td>
+      <td><code>!message.outgoing()</code> check + <code>sender_id == self_user_id</code> check in listener</td>
+    </tr>
+    <tr>
+      <td>Passthrough flag toggleable from outside</td>
+      <td class="pass">PASS</td>
+      <td><code>Arc&lt;Mutex&lt;bool&gt;&gt;</code> on struct, publicly accessible</td>
+    </tr>
+    <tr>
+      <td>Monitored channel set management</td>
+      <td class="pass">PASS</td>
+      <td><code>add_monitored_channel()</code> / <code>remove_monitored_channel()</code></td>
+    </tr>
+    <tr>
+      <td>Message listener spawns as background task</td>
+      <td class="pass">PASS</td>
+      <td><code>spawn_listener()</code> uses <code>tokio::spawn</code> + <code>UpdateStream</code></td>
+    </tr>
+    <tr>
+      <td>Operations on disconnected bridge return <code>NotConnected</code></td>
+      <td class="pass">PASS</td>
+      <td><code>send</code>, <code>create_channel</code>, <code>get_self_user_id</code> all return <code>BridgeError::NotConnected</code></td>
+    </tr>
+    <tr>
+      <td><code>cargo test</code> passes all bridge unit tests</td>
+      <td class="pass">PASS</td>
+      <td>8 bridge tests + 23 pre-existing = 31 total, all passing</td>
+    </tr>
+  </table>
+
+  <h2>API Adaptations (grammers 0.9 vs plan)</h2>
+  <div class="section">
+    <p>The grammers 0.9 API differs significantly from what the plan described (which assumed 0.7 API). Key adaptations made:</p>
+    <table>
+      <tr><th>Plan assumed</th><th>Actual grammers 0.9 API</th></tr>
+      <tr>
+        <td><code>Client::connect(Config { session, api_id, api_hash, params })</code></td>
+        <td><code>SenderPool::new(session, api_id)</code> + <code>Client::new(pool.handle)</code> + <code>tokio::spawn(runner.run())</code></td>
+      </tr>
+      <tr>
+        <td><code>Session::load_file_or_create(&path)</code></td>
+        <td><code>SqliteSession::open(&path).await</code></td>
+      </tr>
+      <tr>
+        <td><code>client.next_update().await</code></td>
+        <td><code>client.stream_updates(updates_rx, config).await</code> then <code>stream.next().await</code></td>
+      </tr>
+      <tr>
+        <td><code>client.request_login_code(&phone)</code></td>
+        <td><code>client.request_login_code(&phone, &api_hash)</code></td>
+      </tr>
+      <tr>
+        <td><code>message.chat().id()</code></td>
+        <td><code>message.peer_id().bot_api_dialog_id().abs()</code></td>
+      </tr>
+      <tr>
+        <td><code>message.sender().map(|s| s.id())</code></td>
+        <td><code>message.sender_id().map(|p| p.bare_id())</code></td>
+      </tr>
+      <tr>
+        <td><code>client.session().save_to_file(&path)</code></td>
+        <td>Not needed; <code>SqliteSession</code> auto-persists</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>Files Created</h2>
+  <pre>
+src-tauri/src/bridges/traits.rs     — Bridge trait + BridgeError
+src-tauri/src/bridges/telegram.rs   — TelegramBridge impl + IncomingMessage + tests
+src-tauri/src/bridges/mod.rs        — Module re-exports
+  </pre>
+
+  <h2>Test Output</h2>
+  <pre>
+running 31 tests
+test bridges::telegram::tests::test_incoming_message_struct ... ok
+test bridges::telegram::tests::test_create_channel_not_connected ... ok
+test bridges::telegram::tests::test_initial_monitored_channels ... ok
+test bridges::telegram::tests::test_monitored_channel_add ... ok
+test bridges::telegram::tests::test_get_self_user_id_not_connected ... ok
+test bridges::telegram::tests::test_passthrough_default_false ... ok
+test bridges::telegram::tests::test_monitored_channel_remove ... ok
+test bridges::telegram::tests::test_send_not_connected ... ok
+[... 23 pre-existing tests ...]
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+  </pre>
+
+  <h2>Architecture Notes</h2>
+  <ul>
+    <li>The bridge owns <code>Arc&lt;SqliteSession&gt;</code> and <code>Client</code> (cloneable handle) as part of <code>ConnectedState</code> created on <code>connect()</code>.</li>
+    <li>The <code>SenderPoolRunner</code> runs as an independent <code>tokio::spawn</code> task driving all network I/O. The <code>Client</code> is just a cheap cloneable handle to it.</li>
+    <li>The update listener task owns the <code>UpdateStream</code> (which wraps the updates receiver from <code>SenderPool</code>). It cannot be shared — this is by design in grammers 0.9.</li>
+    <li>Peer resolution for <code>send()</code> uses the session cache populated during auth and by <code>stream_updates</code>. Peers not in cache will use ambient authority (access_hash=0), which works for contacts.</li>
+    <li><code>create_channel</code> uses the raw <code>tl::functions::messages::CreateChat</code> TL function since grammers 0.9 has no high-level API for group creation.</li>
+  </ul>
+</body>
+</html>

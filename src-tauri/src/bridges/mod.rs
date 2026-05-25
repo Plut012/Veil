@@ -1,2 +1,5 @@
-// Bridges — Phase 5
-// Platform integrations (Telegram via grammers)
+pub mod traits;
+pub mod telegram;
+
+pub use traits::{Bridge, BridgeError};
+pub use telegram::{TelegramBridge, IncomingMessage};
