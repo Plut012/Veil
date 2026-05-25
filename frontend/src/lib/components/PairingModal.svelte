@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { showPairingModal, pairingRole } from '$lib/stores/ui.js';
-	import { veilSocket } from '$lib/api/websocket.js';
+	import { addContact } from '$lib/stores/contacts.js';
+	import { initiatePairing, completePairing } from '$lib/api/tauri.js';
 
 	let qrImage: string | null = null;
 	let scanning = false;
@@ -29,14 +30,19 @@
 		}
 	}
 
-	function startInitiate() {
+	async function startInitiate() {
 		pairingStatus = 'waiting';
-		veilSocket.initiatePairing();
+		try {
+			const pngBase64 = await initiatePairing();
+			qrImage = `data:image/png;base64,${pngBase64}`;
+		} catch (err) {
+			console.error('[pairing] initiatePairing failed:', err);
+			pairingStatus = 'idle';
+		}
 	}
 
 	function startJoin() {
 		scanning = true;
-		// Scanner starts after DOM updates in afterUpdate via reactive
 	}
 
 	async function mountScanner() {
@@ -47,11 +53,19 @@
 			await html5QrScanner.start(
 				{ facingMode: 'environment' },
 				{ fps: 10, qrbox: { width: 220, height: 220 } },
-				(decodedText: string) => {
+				async (decodedText: string) => {
 					stopScanner();
-					veilSocket.completePairing(decodedText);
-					pairingStatus = 'waiting';
 					scanning = false;
+					pairingStatus = 'waiting';
+					try {
+						const contact = await completePairing(decodedText);
+						addContact(contact);
+						pairingStatus = 'done';
+						setTimeout(close, 1200);
+					} catch (err) {
+						console.error('[pairing] completePairing failed:', err);
+						pairingStatus = 'idle';
+					}
 				},
 				undefined
 			);
@@ -73,26 +87,7 @@
 		}
 	}
 
-	// Listen for QR image from backend
-	function onQrMessage(data: unknown) {
-		const msg = data as { qr_image: string };
-		qrImage = `data:image/png;base64,${msg.qr_image}`;
-		pairingStatus = 'waiting';
-	}
-
-	function onPairingComplete() {
-		pairingStatus = 'done';
-		setTimeout(close, 1200);
-	}
-
-	onMount(() => {
-		veilSocket.on('pairing_qr', onQrMessage);
-		veilSocket.on('pairing_complete', onPairingComplete);
-	});
-
 	onDestroy(() => {
-		veilSocket.off('pairing_qr', onQrMessage);
-		veilSocket.off('pairing_complete', onPairingComplete);
 		stopScanner();
 	});
 
@@ -154,13 +149,13 @@
 			<!-- Initiator view -->
 			<div class="initiate-view">
 				<p class="modal-title">Show this QR to your contact</p>
-				{#if qrImage}
+				{#if pairingStatus === 'done'}
+					<p class="status-msg success">Paired.</p>
+				{:else if qrImage}
 					<div class="qr-wrapper">
 						<img src={qrImage} alt="Pairing QR code" class="qr-image" />
 					</div>
 					<p class="qr-hint">The key is ephemeral. Dismiss after scanning.</p>
-				{:else if pairingStatus === 'done'}
-					<p class="status-msg success">Paired.</p>
 				{:else}
 					<div class="qr-placeholder">
 						<span class="loading-dots">...</span>

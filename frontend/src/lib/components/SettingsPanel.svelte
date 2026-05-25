@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { showSettings } from '$lib/stores/ui.js';
-	import { veilSocket } from '$lib/api/websocket.js';
+	import { setTheme } from '$lib/api/tauri.js';
 	import EnvelopeConfig from './EnvelopeConfig.svelte';
 
 	const themes = [
@@ -9,9 +9,13 @@
 
 	let selectedTheme = 'art-nouveau';
 
-	function applyTheme(themeId: string) {
+	async function applyTheme(themeId: string) {
 		selectedTheme = themeId;
-		veilSocket.setTheme(themeId);
+		try {
+			await setTheme(themeId);
+		} catch (err) {
+			console.error('[veil] setTheme failed:', err);
+		}
 	}
 
 	function closeSettings() {

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 7 Eval: App Integration + Frontend Adaptation</title>
+  <style>
+    body { font-family: monospace; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #0d1117; color: #c9d1d9; }
+    h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+    h2 { color: #79c0ff; margin-top: 2rem; }
+    .pass { color: #3fb950; }
+    .fail { color: #f85149; }
+    .note { color: #8b949e; font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #30363d; padding: 0.5rem 1rem; text-align: left; }
+    th { background: #161b22; color: #79c0ff; }
+    tr:nth-child(even) { background: #161b22; }
+    code { background: #161b22; padding: 0.1rem 0.3rem; border-radius: 3px; color: #e6edf3; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; border: 1px solid #30363d; }
+    .section { margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Phase 7 Eval: App Integration + Frontend Adaptation</h1>
+  <p class="note">Evaluated: 2026-05-24 | Tauri 2 | rpassword 5 | toml 0.8 | @tauri-apps/api 2.11</p>
+
+  <h2>Acceptance Criteria</h2>
+  <table>
+    <tr><th>Criterion</th><th>Status</th><th>Notes</th></tr>
+    <tr>
+      <td><code>VeilConfig</code> loads/saves TOML (compatible format with Python version)</td>
+      <td class="pass">PASS</td>
+      <td>Uses <code>toml 0.8</code>. Fields: <code>display_name</code>, <code>envelope_template</code>, <code>theme</code>, <code>[telegram]</code> section with <code>api_id</code>, <code>api_hash</code>, <code>session_path</code>. Load returns <code>Default</code> on missing file. Tested by <code>test_save_and_load_roundtrip</code> and <code>test_load_missing_file_returns_default</code>.</td>
+    </tr>
+    <tr>
+      <td>All Tauri commands wired and callable from frontend</td>
+      <td class="pass">PASS</td>
+      <td><code>tauri::generate_handler![list_contacts, send_message, initiate_pairing, complete_pairing, update_envelope, set_theme]</code> registered in <code>main.rs</code>.</td>
+    </tr>
+    <tr>
+      <td><code>list_contacts</code> returns contact list</td>
+      <td class="pass">PASS</td>
+      <td>Locks <code>state.store</code>, maps <code>Contact</code> → <code>ContactInfo</code> (contact_id, display_name, telegram_channel_id), returns <code>Vec&lt;ContactInfo&gt;</code>.</td>
+    </tr>
+    <tr>
+      <td><code>send_message</code> encrypts, wraps, sends via bridge, emits "out" event</td>
+      <td class="pass">PASS</td>
+      <td>Looks up contact key + channel from store, calls <code>crypto::encrypt</code>, <code>envelope::wrap</code>, <code>bridge.send</code>, emits <code>veil://message</code> with <code>direction: "out"</code>.</td>
+    </tr>
+    <tr>
+      <td>Incoming messages decrypted and emitted as "veil://message" events</td>
+      <td class="pass">PASS</td>
+      <td>Background task in <code>setup()</code> reads from mpsc receiver. For monitored channels: unwraps envelope, base64-decodes, decrypts with contact key, emits <code>veil://message</code> with <code>direction: "in"</code>. Errors (unknown channel, decode failure, decrypt failure) are logged and silently dropped.</td>
+    </tr>
+    <tr>
+      <td><code>initiate_pairing</code> returns QR PNG, sets passthrough</td>
+      <td class="pass">PASS</td>
+      <td>Calls <code>create_qr_payload</code> with own user_id + config display_name + envelope_template. Stores <code>QrPayload</code> in <code>state.pending_pairing</code>. Sets <code>bridge.passthrough = true</code>. Returns URL-safe base64-encoded PNG bytes.</td>
+    </tr>
+    <tr>
+      <td><code>complete_pairing</code> creates channel, sends handshake, saves contact</td>
+      <td class="pass">PASS</td>
+      <td>Joiner role: parses QR payload, creates Telegram group via <code>bridge.create_channel</code>, sends encrypted handshake via <code>build_handshake_message</code> + <code>bridge.send</code>, saves <code>Contact</code> to store, adds to monitored channels, emits <code>veil://pairing_complete</code>.</td>
+    </tr>
+    <tr>
+      <td>Pairing handshake detection works for initiator role</td>
+      <td class="pass">PASS</td>
+      <td><code>handle_incoming_message</code> checks <code>state.pending_pairing</code> first. If set, tries <code>parse_handshake_message</code>. On success: saves contact, adds to monitored channels, disables passthrough, clears pending, emits <code>veil://pairing_complete</code>.</td>
+    </tr>
+    <tr>
+      <td>Frontend uses <code>invoke()</code> / <code>listen()</code> — no WebSocket</td>
+      <td class="pass">PASS</td>
+      <td><code>frontend/src/lib/api/websocket.ts</code> deleted. <code>frontend/src/lib/api/tauri.ts</code> created with all invoke wrappers and listen helpers. All components updated to import from <code>tauri.ts</code>.</td>
+    </tr>
+    <tr>
+      <td>Frontend builds without errors</td>
+      <td class="pass">PASS</td>
+      <td><code>cd frontend &amp;&amp; npm run build</code> succeeds. 54 Rust tests pass. No TypeScript errors.</td>
+    </tr>
+    <tr>
+      <td>Theme switching works</td>
+      <td class="pass">PASS</td>
+      <td><code>SettingsPanel.svelte</code> calls <code>setTheme(themeId)</code> → <code>invoke('set_theme', { themeId })</code> → Rust updates and persists config.</td>
+    </tr>
+    <tr>
+      <td>Envelope template updates persist</td>
+      <td class="pass">PASS</td>
+      <td><code>EnvelopeConfig.svelte</code> calls <code>updateEnvelope(template)</code> → <code>invoke('update_envelope', { template })</code> → Rust updates config and saves to <code>~/.veil/config.toml</code>.</td>
+    </tr>
+  </table>
+
+  <h2>Architecture</h2>
+  <div class="section">
+    <pre>
+Frontend (Svelte)
+  ├── +page.svelte          — onMount: listContacts(), onMessage(), onPairingComplete()
+  ├── Compose.svelte        — sendMessage(contactId, text)
+  ├── PairingModal.svelte   — initiatePairing() / completePairing(qrData)
+  ├── SettingsPanel.svelte  — setTheme(themeId)
+  └── EnvelopeConfig.svelte — updateEnvelope(template)
+       ↕ Tauri IPC (invoke / listen)
+Rust (src-tauri/src/app/)
+  ├── commands.rs           — 6 tauri::command handlers + handle_incoming_message
+  ├── config.rs             — VeilConfig TOML load/save
+  ├── state.rs              — VeilState with Mutex-wrapped fields
+  └── mod.rs                — re-exports
+       ↕
+  ├── crypto/               — encrypt/decrypt (XSalsa20-Poly1305)
+  ├── identity/             — IdentityStore, Contact, pairing
+  ├── envelope/             — wrap/unwrap templates
+  └── bridges/              — TelegramBridge (grammers-client)
+    </pre>
+  </div>
+
+  <h2>New Files</h2>
+  <table>
+    <tr><th>File</th><th>Purpose</th></tr>
+    <tr><td><code>src-tauri/src/app/config.rs</code></td><td><code>VeilConfig</code> + <code>TelegramConfig</code> structs with TOML load/save</td></tr>
+    <tr><td><code>src-tauri/src/app/state.rs</code></td><td><code>VeilState</code> with Mutex-wrapped config, store, bridge, pending_pairing</td></tr>
+    <tr><td><code>src-tauri/src/app/commands.rs</code></td><td>All 6 Tauri command handlers + incoming message processing logic</td></tr>
+    <tr><td><code>src-tauri/src/app/mod.rs</code></td><td>Module declarations + re-exports</td></tr>
+    <tr><td><code>src-tauri/src/main.rs</code></td><td>Full Tauri app: init, config load, passphrase prompt, bridge connect, command registration, setup handler</td></tr>
+    <tr><td><code>frontend/src/lib/api/tauri.ts</code></td><td>TypeScript wrappers: 6 invoke functions + 2 listen helpers</td></tr>
+  </table>
+
+  <h2>Modified Files</h2>
+  <table>
+    <tr><th>File</th><th>Change</th></tr>
+    <tr><td><code>src-tauri/Cargo.toml</code></td><td>Added <code>rpassword = "5"</code></td></tr>
+    <tr><td><code>src-tauri/src/app/mod.rs</code></td><td>Added submodule declarations + re-exports</td></tr>
+    <tr><td><code>frontend/src/lib/stores/connection.ts</code></td><td>Simplified to constant <code>connected</code> state (no WebSocket reconnect logic)</td></tr>
+    <tr><td><code>frontend/src/routes/+page.svelte</code></td><td>Removed WebSocket connect/disconnect; added listContacts() + event listeners on mount</td></tr>
+    <tr><td><code>frontend/src/lib/components/Compose.svelte</code></td><td>Uses <code>sendMessage()</code> from tauri.ts instead of veilSocket</td></tr>
+    <tr><td><code>frontend/src/lib/components/PairingModal.svelte</code></td><td>Uses <code>initiatePairing()</code> / <code>completePairing()</code> from tauri.ts; removed WebSocket event listeners</td></tr>
+    <tr><td><code>frontend/src/lib/components/SettingsPanel.svelte</code></td><td>Uses <code>setTheme()</code> from tauri.ts</td></tr>
+    <tr><td><code>frontend/src/lib/components/EnvelopeConfig.svelte</code></td><td>Uses <code>updateEnvelope()</code> from tauri.ts</td></tr>
+  </table>
+
+  <h2>Deleted Files</h2>
+  <table>
+    <tr><th>File</th><th>Reason</th></tr>
+    <tr><td><code>frontend/src/lib/api/websocket.ts</code></td><td>Replaced by Tauri IPC (invoke/listen). No server, no WebSocket needed.</td></tr>
+  </table>
+
+  <h2>Test Results</h2>
+  <pre>
+running 54 tests
+test app::config::tests::test_load_missing_file_returns_default ... ok
+test app::config::tests::test_default_config ... ok
+test app::config::tests::test_save_and_load_roundtrip ... ok
+... (51 more tests from previous phases)
+
+test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+Frontend: npm run build — SUCCESS (no TypeScript errors, 210 modules transformed)
+  </pre>
+
+  <h2>Key Design Decisions</h2>
+  <ul>
+    <li><strong>connection.ts simplified:</strong> Tauri IPC is always available — replaced the full reconnect-state-machine with a constant <code>readable('connected')</code>. The <code>isConnected</code> derived store always returns <code>true</code>, keeping existing component logic working without changes to their disabled states.</li>
+    <li><strong>Passthrough mode:</strong> On <code>initiate_pairing</code>, <code>bridge.passthrough</code> is set to <code>true</code> so the listener task receives messages from channels not yet in <code>monitored_channels</code>. It is cleared after handshake detection.</li>
+    <li><strong>Dual-template unwrap:</strong> Incoming messages are tried against the contact's stored envelope template and the empty template (<code>""</code>), so raw ciphertext is also accepted as a fallback.</li>
+    <li><strong>Initiator role contact telegram_user_id:</strong> Set to <code>0</code> since the initiator does not learn the joiner's user ID from the handshake message. Only the channel ID is known.</li>
+    <li><strong>Passphrase via rpassword:</strong> Uses <code>read_password_from_tty</code> (rpassword 5 API) so the passphrase does not echo to the terminal during startup.</li>
+    <li><strong>Block-on bridge connect in setup:</strong> <code>tauri::async_runtime::block_on</code> is used to perform the async bridge connect synchronously before the UI opens. This allows interactive Telegram sign-in (phone + code + optional 2FA) via stdin before the window appears.</li>
+  </ul>
+</body>
+</html>

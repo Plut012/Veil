@@ -1,17 +1,21 @@
 <script lang="ts">
-	import { veilSocket } from '$lib/api/websocket.js';
+	import { updateEnvelope } from '$lib/api/tauri.js';
 
 	let template = '{ciphertext}';
 	let saved = false;
 	let saveTimer: ReturnType<typeof setTimeout>;
 
-	function save() {
-		veilSocket.updateEnvelope(template);
-		saved = true;
-		clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => {
-			saved = false;
-		}, 2000);
+	async function save() {
+		try {
+			await updateEnvelope(template);
+			saved = true;
+			clearTimeout(saveTimer);
+			saveTimer = setTimeout(() => {
+				saved = false;
+			}, 2000);
+		} catch (err) {
+			console.error('[veil] updateEnvelope failed:', err);
+		}
 	}
 </script>
 

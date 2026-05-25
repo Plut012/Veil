@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { veilSocket } from '$lib/api/websocket.js';
+	import { listContacts, onMessage, onPairingComplete } from '$lib/api/tauri.js';
+	import { setContacts, addContact } from '$lib/stores/contacts.js';
+	import { addMessage } from '$lib/stores/messages.js';
 	import { showPairingModal } from '$lib/stores/ui.js';
 	import { showSettings } from '$lib/stores/ui.js';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -8,12 +10,36 @@
 	import PairingModal from '$lib/components/PairingModal.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 
-	onMount(() => {
-		veilSocket.connect();
+	let unlistenMessage: (() => void) | null = null;
+	let unlistenPairing: (() => void) | null = null;
+
+	onMount(async () => {
+		// Load contacts from Rust
+		try {
+			const contacts = await listContacts();
+			setContacts(contacts);
+		} catch (err) {
+			console.error('[veil] listContacts failed:', err);
+		}
+
+		// Listen for incoming messages
+		const unlistenMsgPromise = onMessage((msg) => {
+			addMessage(msg);
+		});
+
+		// Listen for pairing completions
+		const unlistenPairPromise = onPairingComplete((contact) => {
+			addContact(contact);
+			showPairingModal.set(false);
+		});
+
+		unlistenMessage = await unlistenMsgPromise;
+		unlistenPairing = await unlistenPairPromise;
 	});
 
 	onDestroy(() => {
-		veilSocket.disconnect();
+		if (unlistenMessage) unlistenMessage();
+		if (unlistenPairing) unlistenPairing();
 	});
 </script>
 

@@ -1,15 +1,19 @@
 <script lang="ts">
 	import { selectedContactId } from '$lib/stores/ui.js';
 	import { isConnected } from '$lib/stores/connection.js';
-	import { veilSocket } from '$lib/api/websocket.js';
+	import { sendMessage } from '$lib/api/tauri.js';
 
 	let text = '';
 
-	function send() {
+	async function send() {
 		const trimmed = text.trim();
 		if (!trimmed || !$selectedContactId || !$isConnected) return;
-		veilSocket.sendMessage($selectedContactId, trimmed);
-		text = '';
+		try {
+			await sendMessage($selectedContactId, trimmed);
+			text = '';
+		} catch (err) {
+			console.error('[veil] sendMessage failed:', err);
+		}
 	}
 
 	function onKeydown(e: KeyboardEvent) {
