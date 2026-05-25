@@ -69,6 +69,7 @@ class VeilApp:
                     self.store, self.bridge,
                 )
                 self._pending_pairing = None
+                self.bridge.passthrough = False
                 await self._broadcast({
                     "type": "pairing_complete",
                     "contact": {
@@ -206,6 +207,7 @@ class VeilApp:
                 self.config.envelope_template,
             )
             self._pending_pairing = payload
+            self.bridge.passthrough = True
             await ws.send_text(json.dumps({
                 "type": "pairing_qr",
                 "qr_image": base64.b64encode(qr_bytes).decode("ascii"),

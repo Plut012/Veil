@@ -32,8 +32,10 @@ class TelegramBridge:
         self.api_hash = api_hash
         self.session_path = session_path
         self.monitored_channels: set[int] = monitored_channels or set()
+        self.passthrough: bool = False
         self._client: TelegramClient | None = None
         self._receive_callback: Callable[[int, str], Awaitable[None]] | None = None
+        self._self_user_id: int | None = None
 
     async def connect(self) -> None:
         """
@@ -49,12 +51,16 @@ class TelegramBridge:
             self.api_hash,
         )
         await self._client.start()
+        me = await self._client.get_me()
+        self._self_user_id = me.id
         logger.info("Telegram bridge connected")
 
         @self._client.on(events.NewMessage)
         async def handler(event):
+            if event.sender_id == self._self_user_id:
+                return  # skip own messages
             chat_id = event.chat_id
-            if chat_id in self.monitored_channels and self._receive_callback:
+            if (self.passthrough or chat_id in self.monitored_channels) and self._receive_callback:
                 await self._receive_callback(chat_id, event.raw_text)
 
     async def disconnect(self) -> None:
