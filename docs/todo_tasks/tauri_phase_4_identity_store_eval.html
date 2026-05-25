@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tauri Phase 4 Evaluation — Identity Store</title>
+  <style>
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0f0f14;
+      color: #d4c8e8;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1 { color: #c084fc; border-bottom: 1px solid #3b1f5e; padding-bottom: 0.5rem; }
+    h2 { color: #a855f7; margin-top: 2rem; }
+    h3 { color: #9333ea; }
+    .status-badge {
+      display: inline-block;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .pass { background: #14532d; color: #86efac; }
+    .fail { background: #450a0a; color: #fca5a5; }
+    .warn { background: #451a03; color: #fdba74; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    th {
+      background: #1e1030;
+      color: #c084fc;
+      padding: 0.6rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #3b1f5e;
+    }
+    td {
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid #1e1030;
+    }
+    tr:hover td { background: #16102a; }
+    code {
+      background: #1e1030;
+      color: #e879f9;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    pre {
+      background: #1e1030;
+      border: 1px solid #3b1f5e;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+    }
+    .criterion { margin: 0.5rem 0; display: flex; align-items: flex-start; gap: 0.75rem; }
+    .criterion .check { font-size: 1.2rem; flex-shrink: 0; }
+    .note { background: #1a0a2e; border-left: 3px solid #7c3aed; padding: 0.75rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+    .section { background: #13101e; border: 1px solid #2a1a4a; border-radius: 8px; padding: 1.5rem; margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+
+<h1>Tauri Phase 4 — Identity Store Evaluation</h1>
+<p>
+  <strong>Date:</strong> 2026-05-24 &nbsp;|&nbsp;
+  <strong>Branch:</strong> <code>tauri</code> &nbsp;|&nbsp;
+  <strong>Status:</strong> <span class="status-badge pass">COMPLETE</span>
+</p>
+
+<div class="section">
+  <h2>Acceptance Criteria</h2>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>IdentityStore::new()</code> creates dirs with 0o700 permissions.</strong>
+      Both <code>{veil_dir}/</code> and <code>{veil_dir}/keyring/</code> are created with <code>fs::create_dir_all</code>
+      and then <code>fs::set_permissions(0o700)</code> on Unix. Verified by <code>test_directory_permissions_are_0700</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Passphrase derived to storage key via Argon2id.</strong>
+      <code>Argon2::default()</code> (Argon2id variant with default memory/iteration parameters) is called via
+      <code>hash_password_into(passphrase, salt, &amp;mut key)</code>. The 32-byte output key is used for all
+      subsequent encrypt/decrypt operations.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Salt generated on first run, persisted at <code>{veil_dir}/salt</code>.</strong>
+      On first call, a 16-byte random salt is generated via <code>sodiumoxide::randombytes::randombytes(16)</code>
+      and written to <code>salt</code>. Subsequent calls read the file. Verified implicitly by the persistence test:
+      two store instances opened with the same passphrase produce the same storage key and can decrypt each other's contacts.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Contacts encrypted as individual <code>.enc</code> files.</strong>
+      Each contact is stored at <code>keyring/{contact_id}.enc</code> as
+      <code>encrypt(serde_json::to_vec(&amp;contact), &amp;storage_key)</code> — XSalsa20-Poly1305 sealed bytes.
+      Verified by <code>test_contact_files_are_encrypted</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Contacts survive close/reopen with same passphrase.</strong>
+      A contact added in one store instance is present after creating a new instance with the same passphrase
+      pointing to the same directory. Verified by <code>test_persistence_across_instances</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Wrong passphrase results in empty contact list (no crash).</strong>
+      <code>load_contacts()</code> silently skips files where <code>decrypt()</code> returns an error.
+      A store opened with the wrong passphrase returns an empty <code>list_contacts()</code>.
+      Verified by <code>test_wrong_passphrase_yields_empty_list</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>CRUD operations: add, remove, get by ID, get by channel, list, update.</strong>
+      All six public methods implemented with correct memory + disk semantics.
+      Each has a dedicated test.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong>Contact files on disk are not readable as plaintext.</strong>
+      <code>serde_json::from_slice</code> on the raw <code>.enc</code> file returns an error.
+      Verified by <code>test_contact_files_are_encrypted</code>.
+    </div>
+  </div>
+
+  <div class="criterion">
+    <span class="check">&#10003;</span>
+    <div><strong><code>cargo test</code> passes all identity tests.</strong>
+      10 new identity tests (2 contact, 8 store) added to the suite. All 42 total tests pass.
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Test Results</h2>
+  <pre>$ cd src-tauri && cargo test
+   Compiling veil v0.1.0 (/data/dev/veil/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.59s
+     Running unittests src/lib.rs (target/debug/deps/veil_lib-9083706c4ed932f9)
+
+running 42 tests
+test bridges::telegram::tests::test_incoming_message_struct ... ok
+test crypto::engine::tests::test_empty_message_roundtrip ... ok
+test bridges::telegram::tests::test_passthrough_default_false ... ok
+test bridges::telegram::tests::test_send_not_connected ... ok
+test bridges::telegram::tests::test_create_channel_not_connected ... ok
+test bridges::telegram::tests::test_monitored_channel_add ... ok
+test bridges::telegram::tests::test_get_self_user_id_not_connected ... ok
+test bridges::telegram::tests::test_monitored_channel_remove ... ok
+test bridges::telegram::tests::test_initial_monitored_channels ... ok
+test crypto::engine::tests::test_tampered_ciphertext_fails ... ok
+test crypto::engine::tests::test_unique_nonces ... ok
+test crypto::engine::tests::test_truncated_ciphertext_fails ... ok
+test crypto::engine::tests::test_sealed_format_size ... ok
+test crypto::engine::tests::test_roundtrip ... ok
+test crypto::keys::tests::test_invalid_base64_rejected ... ok
+test crypto::keys::tests::test_key_base64_roundtrip ... ok
+test crypto::engine::tests::test_wrong_key_fails ... ok
+test crypto::keys::tests::test_key_length ... ok
+test crypto::keys::tests::test_keys_are_unique ... ok
+test envelope::format::tests::test_emoji_template_wrap ... ok
+test crypto::keys::tests::test_invalid_key_length_rejected ... ok
+test envelope::format::tests::test_wrap_empty_template ... ok
+test envelope::format::tests::test_wrap_prefix_template ... ok
+test identity::contact::tests::test_key_stored_as_base64_not_raw_bytes ... ok
+test identity::contact::tests::test_contact_serde_roundtrip ... ok
+test envelope::format::tests::test_wrap_simple ... ok
+test envelope::format::tests::test_unwrap_no_match_returns_none ... ok
+test envelope::format::tests::test_unwrap_empty_template_raw_ciphertext ... ok
+test envelope::format::tests::test_regex_special_chars_in_template ... ok
+test envelope::format::tests::test_emoji_template_unwrap ... ok
+test envelope::format::tests::test_unwrap_match ... ok
+test envelope::format::tests::test_roundtrip ... ok
+test envelope::format::tests::test_unwrap_multiple_templates_first_match_wins ... ok
+test identity::store::tests::test_list_contacts ... ok
+test identity::store::tests::test_contact_files_are_encrypted ... ok
+test identity::store::tests::test_remove_contact ... ok
+test identity::store::tests::test_get_contact_by_channel ... ok
+test identity::store::tests::test_directory_permissions_are_0700 ... ok
+test identity::store::tests::test_add_and_get_contact ... ok
+test identity::store::tests::test_update_contact ... ok
+test identity::store::tests::test_persistence_across_instances ... ok
+test identity::store::tests::test_wrong_passphrase_yields_empty_list ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s</pre>
+</div>
+
+<div class="section">
+  <h2>Test Cases Detail</h2>
+
+  <table>
+    <tr>
+      <th>Test</th>
+      <th>What It Verifies</th>
+      <th>Result</th>
+    </tr>
+    <tr>
+      <td><code>contact::test_contact_serde_roundtrip</code></td>
+      <td>All Contact fields survive a JSON serialize/deserialize cycle</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>contact::test_key_stored_as_base64_not_raw_bytes</code></td>
+      <td>The 32-byte key field is serialized as a base64 string, not a JSON byte array</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_add_and_get_contact</code></td>
+      <td>Contact is retrievable by ID immediately after adding</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_persistence_across_instances</code></td>
+      <td>Contact added to one store instance is present in a second instance with the same passphrase</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_wrong_passphrase_yields_empty_list</code></td>
+      <td>Wrong passphrase causes all contacts to be silently skipped; no panic or error</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_get_contact_by_channel</code></td>
+      <td>Contact is found by Telegram channel ID; unknown channel returns <code>None</code></td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_remove_contact</code></td>
+      <td>Removed contact is gone from both in-memory HashMap and from disk</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_list_contacts</code></td>
+      <td>Empty store returns empty list; after adding 3 contacts, list has 3 entries</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_update_contact</code></td>
+      <td>Updated contact reflects changes in memory and persists to disk across instances</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_directory_permissions_are_0700</code></td>
+      <td>Both <code>veil_dir</code> and <code>keyring_dir</code> have mode <code>0700</code> (Unix only)</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+    <tr>
+      <td><code>store::test_contact_files_are_encrypted</code></td>
+      <td>Raw bytes of <code>.enc</code> file are not valid JSON — ciphertext is opaque binary</td>
+      <td><span class="status-badge pass">PASS</span></td>
+    </tr>
+  </table>
+</div>
+
+<div class="section">
+  <h2>Implementation Notes</h2>
+  <ul>
+    <li>
+      <strong>No <code>unwrap()</code> in library code.</strong> All public and private functions return
+      <code>Result</code> and propagate errors with <code>?</code>. The only <code>.expect()</code> calls
+      are in test helpers (<code>sodiumoxide::init()</code>) and in the crypto engine (a pre-existing invariant
+      asserting a 32-byte slice is always valid for <code>secretbox::Key::from_slice</code>).
+    </li>
+    <li>
+      <strong>Salt generation uses <code>sodiumoxide::randombytes::randombytes(16)</code>.</strong>
+      Sodiumoxide was already a project dependency and initialized; this avoids pulling in another RNG crate
+      just for salt generation. The salt is 16 bytes, satisfying the argon2 crate's minimum of 8 bytes.
+    </li>
+    <li>
+      <strong>Each test uses a unique temporary directory.</strong> <code>std::env::temp_dir().join(Uuid::new_v4())</code>
+      ensures tests are fully isolated — no shared state, no teardown needed.
+    </li>
+    <li>
+      <strong><code>load_contacts()</code> is fully silent on failure.</strong> Each step (read_dir, read file,
+      decrypt, deserialize) is individually guarded with <code>.flatten()</code> or <code>match/continue</code>,
+      so a corrupt or wrongly-keyed file does not prevent other contacts from loading.
+    </li>
+    <li>
+      <strong><code>pub mod pairing;</code> placeholder added.</strong> An empty <code>pairing.rs</code> is
+      declared in <code>mod.rs</code> so Phase 6 can fill it in without modifying module declarations.
+    </li>
+    <li>
+      <strong>No <code>dirs</code> version conflict.</strong> The plan lists <code>dirs = "5"</code> but the
+      crate resolved to <code>dirs v5.0.1</code>. The <code>dirs::home_dir()</code> API is identical across
+      both the <code>dirs v5</code> and <code>dirs v6</code> versions present in the dependency tree
+      (tauri pulls in v6 internally; our code uses v5 directly).
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>Files Created</h2>
+  <pre>src-tauri/src/identity/
+  contact.rs   — Contact struct, base64_key serde module, 2 inline tests
+  store.rs     — IdentityStore, derive_key(), ensure_dir(), StoreError, 9 inline tests
+  pairing.rs   — empty placeholder for Phase 6
+  mod.rs       — pub use Contact, IdentityStore; pub mod pairing</pre>
+</div>
+
+</body>
+</html>
