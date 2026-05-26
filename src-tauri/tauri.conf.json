@@ -8,6 +8,11 @@
     "devUrl": "http://localhost:5173",
     "frontendDist": "../frontend/dist"
   },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  },
   "app": {
     "windows": [
       {

@@ -36,6 +36,7 @@ fn main() {
     let veil_state = VeilState::new(config, config_path, veil_dir, message_tx);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(veil_state)
         .invoke_handler(tauri::generate_handler![
             // Setup commands

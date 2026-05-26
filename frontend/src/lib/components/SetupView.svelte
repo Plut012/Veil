@@ -7,6 +7,7 @@
 		submitTelegramCode,
 		submit2faPassword
 	} from '$lib/api/tauri.js';
+	import { open } from '@tauri-apps/plugin-shell';
 
 	export let status: string;
 
@@ -148,6 +149,15 @@
 		}
 	}
 
+	async function openTelegramApps() {
+		try {
+			await open('https://my.telegram.org/apps');
+		} catch {
+			// Fallback: if shell plugin isn't available, let browser handle it
+			window.open('https://my.telegram.org/apps', '_blank');
+		}
+	}
+
 	function handleKeydown(e: KeyboardEvent, handler: () => void) {
 		if (e.key === 'Enter') handler();
 	}
@@ -156,6 +166,15 @@
 <div class="setup-overlay">
 	<div class="setup-card">
 		{#if step === 'config'}
+			<div class="setup-guidance">
+				<p class="guidance-text">
+					Create an app at
+					<!-- svelte-ignore a11y-invalid-attribute -->
+					<a href="#" class="guidance-link" on:click|preventDefault={() => openTelegramApps()}>my.telegram.org/apps</a>
+					and paste your credentials below.
+				</p>
+				<p class="guidance-hint">App title and platform can be anything.</p>
+			</div>
 			<input
 				type="number"
 				placeholder="API ID"
@@ -164,6 +183,7 @@
 				on:keydown={(e) => handleKeydown(e, handleConfig)}
 				disabled={loading}
 				class="setup-input"
+				autofocus
 			/>
 			<input
 				type="text"
@@ -306,6 +326,36 @@
 	}
 	.setup-input[type='number'] {
 		-moz-appearance: textfield;
+	}
+
+	.setup-guidance {
+		margin-bottom: var(--spacing-sm);
+	}
+
+	.guidance-text {
+		font-size: 13px;
+		color: var(--color-text-muted);
+		line-height: 1.5;
+	}
+
+	.guidance-link {
+		color: var(--color-accent);
+		text-decoration: none;
+		border-bottom: 1px solid var(--color-accent-dim);
+		transition: color var(--transition-fast), border-color var(--transition-fast);
+		cursor: pointer;
+	}
+
+	.guidance-link:hover {
+		color: var(--color-text);
+		border-color: var(--color-text);
+	}
+
+	.guidance-hint {
+		font-size: 11px;
+		color: var(--color-text-muted);
+		opacity: 0.6;
+		margin-top: var(--spacing-xs);
 	}
 
 	.setup-error {
