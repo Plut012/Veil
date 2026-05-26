@@ -1,12 +1,16 @@
+use std::collections::HashSet;
+
 use base64::{engine::general_purpose::URL_SAFE, Engine};
 use chrono::Utc;
+use grammers_client::client::{LoginToken, PasswordToken};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::app::state::VeilState;
-use crate::bridges::Bridge;
+use crate::bridges::{Bridge, TelegramBridge};
 use crate::crypto::encrypt;
 use crate::envelope::{unwrap, wrap};
+use crate::identity::IdentityStore;
 use crate::identity::contact::Contact;
 use crate::identity::pairing::{build_handshake_message, create_qr_payload, parse_handshake_message};
 
@@ -40,13 +44,201 @@ impl From<&Contact> for ContactInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Commands
+// Setup commands
+// ---------------------------------------------------------------------------
+
+/// Return the current setup status.
+/// "needs_config"        — API credentials not yet saved
+/// "needs_passphrase"    — config present but store not yet unlocked
+/// "needs_telegram_auth" — store unlocked but Telegram not yet authenticated
+/// "ready"               — fully initialised, chat view can load
+#[tauri::command]
+pub async fn get_setup_status(state: State<'_, VeilState>) -> Result<String, String> {
+    let config = state.config.lock().await;
+    if config.telegram.api_id == 0 || config.telegram.api_hash.is_empty() {
+        return Ok("needs_config".to_string());
+    }
+    drop(config);
+
+    let store = state.store.lock().await;
+    if store.is_none() {
+        return Ok("needs_passphrase".to_string());
+    }
+    drop(store);
+
+    let bridge = state.bridge.lock().await;
+    match bridge.as_ref() {
+        None => Ok("needs_telegram_auth".to_string()),
+        Some(b) => {
+            // Bridge is Some — check if self_user_id has been populated (i.e. connected + authed).
+            match b.get_self_user_id().await {
+                Ok(_) => Ok("ready".to_string()),
+                Err(_) => Ok("needs_telegram_auth".to_string()),
+            }
+        }
+    }
+}
+
+/// Save API credentials and display name (step 1).
+#[tauri::command]
+pub async fn submit_config(
+    state: State<'_, VeilState>,
+    api_id: i32,
+    api_hash: String,
+    display_name: String,
+) -> Result<(), String> {
+    let mut config = state.config.lock().await;
+    config.telegram.api_id = api_id;
+    config.telegram.api_hash = api_hash;
+    config.display_name = display_name;
+    config.save(&state.config_path).map_err(|e| e.to_string())
+}
+
+/// Unlock the keyring with passphrase, initialise IdentityStore and TelegramBridge (step 2).
+/// Returns the next status: "needs_telegram_auth" or "ready".
+#[tauri::command]
+pub async fn submit_passphrase(
+    state: State<'_, VeilState>,
+    passphrase: String,
+) -> Result<String, String> {
+    let (api_id, api_hash, session_path) = {
+        let config = state.config.lock().await;
+        (
+            config.telegram.api_id,
+            config.telegram.api_hash.clone(),
+            config.telegram.session_path.clone(),
+        )
+    };
+
+    // Initialise identity store.
+    let identity_store = IdentityStore::new(&passphrase, Some(state.veil_dir.clone()))
+        .map_err(|e| e.to_string())?;
+
+    let monitored: HashSet<i64> = identity_store
+        .list_contacts()
+        .iter()
+        .map(|c| c.telegram_channel_id)
+        .collect();
+
+    // Store the identity store.
+    {
+        let mut store = state.store.lock().await;
+        *store = Some(identity_store);
+    }
+
+    // Create the bridge (not yet connected).
+    let bridge = TelegramBridge::new(
+        api_id,
+        api_hash,
+        std::path::PathBuf::from(&session_path),
+        monitored,
+        state.message_tx.clone(),
+    );
+
+    {
+        let mut bridge_lock = state.bridge.lock().await;
+        *bridge_lock = Some(bridge);
+    }
+
+    // Try to connect — if a valid session exists, we go straight to "ready".
+    let is_authorized = {
+        let mut bridge_lock = state.bridge.lock().await;
+        let bridge = bridge_lock.as_mut().ok_or("bridge not initialised")?;
+        bridge.connect_unauthenticated().await.map_err(|e| e.to_string())?
+    };
+
+    if is_authorized {
+        // Session is valid — finalize the connection (spawns listener).
+        {
+            let mut bridge_lock = state.bridge.lock().await;
+            let bridge = bridge_lock.as_mut().ok_or("bridge not initialised")?;
+            bridge.finalize_connection().await.map_err(|e| e.to_string())?;
+        }
+        Ok("ready".to_string())
+    } else {
+        Ok("needs_telegram_auth".to_string())
+    }
+}
+
+/// Request a Telegram login code for the given phone number (step 3a).
+#[tauri::command]
+pub async fn request_telegram_code(
+    state: State<'_, VeilState>,
+    phone: String,
+) -> Result<(), String> {
+    let token: LoginToken = {
+        let bridge_lock = state.bridge.lock().await;
+        let bridge = bridge_lock.as_ref().ok_or("bridge not initialised")?;
+        bridge
+            .request_login_code_for_phone(&phone)
+            .await
+            .map_err(|e: crate::bridges::BridgeError| e.to_string())?
+    };
+
+    let mut login_token = state.login_token.lock().await;
+    *login_token = Some(token);
+
+    Ok(())
+}
+
+/// Submit the Telegram login code (step 3b).
+/// Returns "ready" if sign-in succeeded, or "needs_2fa" if 2FA is required.
+#[tauri::command]
+pub async fn submit_telegram_code(
+    state: State<'_, VeilState>,
+    code: String,
+) -> Result<String, String> {
+    let token: LoginToken = {
+        let mut login_token = state.login_token.lock().await;
+        login_token.take().ok_or("no pending login token — call request_telegram_code first")?
+    };
+
+    let password_token: Option<PasswordToken> = {
+        let mut bridge_lock = state.bridge.lock().await;
+        let bridge = bridge_lock.as_mut().ok_or("bridge not initialised")?;
+        bridge
+            .sign_in_with_code(token, &code)
+            .await
+            .map_err(|e: crate::bridges::BridgeError| e.to_string())?
+    };
+
+    if let Some(pt) = password_token {
+        let mut pw_token = state.password_token.lock().await;
+        *pw_token = Some(pt);
+        Ok("needs_2fa".to_string())
+    } else {
+        Ok("ready".to_string())
+    }
+}
+
+/// Submit 2FA password (step 3c, optional).
+#[tauri::command]
+pub async fn submit_2fa_password(
+    state: State<'_, VeilState>,
+    password: String,
+) -> Result<(), String> {
+    let token: PasswordToken = {
+        let mut pw_token = state.password_token.lock().await;
+        pw_token.take().ok_or("no pending 2FA token")?
+    };
+
+    let mut bridge_lock = state.bridge.lock().await;
+    let bridge = bridge_lock.as_mut().ok_or("bridge not initialised")?;
+    bridge
+        .check_2fa_password(token, &password)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// App commands (only valid after setup)
 // ---------------------------------------------------------------------------
 
 /// Return the full contact list.
 #[tauri::command]
 pub async fn list_contacts(state: State<'_, VeilState>) -> Result<Vec<ContactInfo>, String> {
     let store = state.store.lock().await;
+    let store = store.as_ref().ok_or("not initialized")?;
     let contacts: Vec<ContactInfo> = store.list_contacts().iter().map(|c| ContactInfo::from(*c)).collect();
     Ok(contacts)
 }
@@ -63,6 +255,7 @@ pub async fn send_message(
     // 1. Look up contact and grab needed fields
     let (key, channel_id, template) = {
         let store = state.store.lock().await;
+        let store = store.as_ref().ok_or("not initialized")?;
         let contact = store
             .get_contact(&contact_id)
             .ok_or_else(|| format!("contact not found: {contact_id}"))?;
@@ -79,6 +272,7 @@ pub async fn send_message(
     // 4. Send via bridge
     {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         bridge
             .send(channel_id, &envelope)
             .await
@@ -104,6 +298,7 @@ pub async fn initiate_pairing(state: State<'_, VeilState>) -> Result<String, Str
     // Get our own Telegram user ID and config values
     let (self_user_id, display_name, envelope_template) = {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         let uid = bridge.get_self_user_id().await.map_err(|e| e.to_string())?;
         let config = state.config.lock().await;
         (uid, config.display_name.clone(), config.envelope_template.clone())
@@ -123,6 +318,7 @@ pub async fn initiate_pairing(state: State<'_, VeilState>) -> Result<String, Str
     // Enable passthrough so we receive messages from unknown channels
     {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         let mut passthrough = bridge.passthrough.lock().await;
         *passthrough = true;
     }
@@ -151,6 +347,7 @@ pub async fn complete_pairing(
     // 2. Create Telegram group with the initiator
     let channel_id = {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         bridge
             .create_channel(&[qr.telegram_user_id], &format!("veil:{}", qr.display_name))
             .await
@@ -162,6 +359,7 @@ pub async fn complete_pairing(
         .map_err(|e| e.to_string())?;
     {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         bridge
             .send(channel_id, &handshake)
             .await
@@ -181,12 +379,14 @@ pub async fn complete_pairing(
 
     {
         let mut store = state.store.lock().await;
+        let store = store.as_mut().ok_or("not initialized")?;
         store.add_contact(contact.clone()).map_err(|e| e.to_string())?;
     }
 
     // 5. Add to monitored channels
     {
         let bridge = state.bridge.lock().await;
+        let bridge = bridge.as_ref().ok_or("not initialized")?;
         bridge.add_monitored_channel(channel_id).await;
     }
 
@@ -254,8 +454,13 @@ pub async fn handle_incoming_message(
 
             {
                 let mut store = state.store.lock().await;
-                if let Err(e) = store.add_contact(contact.clone()) {
-                    log::error!("failed to save contact after handshake: {e}");
+                if let Some(store) = store.as_mut() {
+                    if let Err(e) = store.add_contact(contact.clone()) {
+                        log::error!("failed to save contact after handshake: {e}");
+                        return;
+                    }
+                } else {
+                    log::error!("store not initialized when receiving handshake");
                     return;
                 }
             }
@@ -263,9 +468,11 @@ pub async fn handle_incoming_message(
             // Add to monitored channels and disable passthrough
             {
                 let bridge = state.bridge.lock().await;
-                bridge.add_monitored_channel(channel_id).await;
-                let mut passthrough = bridge.passthrough.lock().await;
-                *passthrough = false;
+                if let Some(bridge) = bridge.as_ref() {
+                    bridge.add_monitored_channel(channel_id).await;
+                    let mut passthrough = bridge.passthrough.lock().await;
+                    *passthrough = false;
+                }
             }
 
             // Clear pending pairing
@@ -285,7 +492,10 @@ pub async fn handle_incoming_message(
     // Normal encrypted message — look up contact by channel
     let contact_opt = {
         let store = state.store.lock().await;
-        store.get_contact_by_channel(channel_id).map(|c| (c.contact_id.clone(), c.key, c.envelope_template.clone()))
+        store.as_ref().and_then(|s| {
+            s.get_contact_by_channel(channel_id)
+                .map(|c| (c.contact_id.clone(), c.key, c.envelope_template.clone()))
+        })
     };
 
     let (contact_id, key, template) = match contact_opt {

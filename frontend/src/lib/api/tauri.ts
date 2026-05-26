@@ -15,6 +15,38 @@ export interface MessageEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Setup commands
+// ---------------------------------------------------------------------------
+
+export async function getSetupStatus(): Promise<string> {
+	return invoke('get_setup_status');
+}
+
+export async function submitConfig(
+	apiId: number,
+	apiHash: string,
+	displayName: string
+): Promise<void> {
+	return invoke('submit_config', { apiId, apiHash, displayName });
+}
+
+export async function submitPassphrase(passphrase: string): Promise<string> {
+	return invoke('submit_passphrase', { passphrase });
+}
+
+export async function requestTelegramCode(phone: string): Promise<void> {
+	return invoke('request_telegram_code', { phone });
+}
+
+export async function submitTelegramCode(code: string): Promise<string> {
+	return invoke('submit_telegram_code', { code });
+}
+
+export async function submit2faPassword(password: string): Promise<void> {
+	return invoke('submit_2fa_password', { password });
+}
+
+// ---------------------------------------------------------------------------
 // Commands (frontend → Rust)
 // ---------------------------------------------------------------------------
 

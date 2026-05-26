@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Veil Phase 8 — UI Setup Eval</title>
+<style>
+  :root {
+    --bg: #2a2520;
+    --surface: #352f29;
+    --elevated: #3f3832;
+    --text: #d4c5b3;
+    --muted: #8a7e71;
+    --accent: #c4956a;
+    --border: #4a4238;
+    --error: #9a5a4a;
+    --success: #7a9a6a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", sans-serif; font-size: 14px; line-height: 1.6; padding: 40px; }
+  h1 { color: var(--accent); font-size: 20px; font-weight: 400; margin-bottom: 8px; letter-spacing: 0.04em; }
+  h2 { color: var(--text); font-size: 14px; font-weight: 600; margin: 32px 0 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  p { color: var(--muted); margin-bottom: 10px; max-width: 680px; }
+  .section { border-left: 2px solid var(--border); padding-left: 20px; margin-bottom: 32px; }
+  .check { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .check-icon { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; margin-top: 2px; }
+  .ok { background: var(--success); color: #1a2a1a; }
+  .warn { background: var(--accent); color: #2a1a0a; }
+  .na { background: var(--elevated); color: var(--muted); }
+  .check-label { color: var(--text); }
+  .check-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .code { background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--text); overflow-x: auto; margin: 12px 0; white-space: pre; }
+  .step-diagram { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+  .step-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; min-width: 160px; }
+  .step-box h3 { color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+  .step-box ul { list-style: none; }
+  .step-box li { color: var(--muted); font-size: 12px; padding: 2px 0; }
+  .step-arrow { color: var(--border); font-size: 20px; align-self: center; }
+</style>
+</head>
+<body>
+
+<h1>Veil — Phase 8: UI-Based Setup Flow</h1>
+<p>Evaluation checklist for the setup flow implementation. Replaces all stdin prompts with an in-app multi-step setup UI.</p>
+
+<h2>Architecture</h2>
+<div class="section">
+  <p>State model: VeilState now holds <code>store: Mutex&lt;Option&lt;IdentityStore&gt;&gt;</code> and <code>bridge: Mutex&lt;Option&lt;TelegramBridge&gt;&gt;</code>. Both are None at startup. Setup commands populate them lazily.</p>
+  <div class="step-diagram">
+    <div class="step-box">
+      <h3>App Launch</h3>
+      <ul>
+        <li>No stdin prompts</li>
+        <li>State starts empty</li>
+        <li>Frontend queries status</li>
+      </ul>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step-box">
+      <h3>Setup Flow</h3>
+      <ul>
+        <li>Config (first run)</li>
+        <li>Passphrase (every run)</li>
+        <li>Telegram auth (if needed)</li>
+      </ul>
+    </div>
+    <div class="step-arrow">→</div>
+    <div class="step-box">
+      <h3>Chat View</h3>
+      <ul>
+        <li>Contacts loaded</li>
+        <li>Messages stream live</li>
+        <li>All commands active</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h2>Acceptance Criteria</h2>
+<div class="section">
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">App launches with no terminal interaction</div>
+      <div class="check-detail">main.rs has no prompt() calls, no rpassword usage, no stdin reads. State starts with store: None, bridge: None.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">get_setup_status correctly detects all states</div>
+      <div class="check-detail">Returns "needs_config" when api_id == 0 or api_hash empty. Returns "needs_passphrase" when store is None. Returns "needs_telegram_auth" when bridge is None or self_user_id == 0. Returns "ready" when bridge is connected with valid self_user_id.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">Config step saves API credentials and display name</div>
+      <div class="check-detail">submit_config writes api_id, api_hash, display_name to config.toml. Next call to get_setup_status advances past "needs_config".</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">Passphrase step initializes IdentityStore and TelegramBridge</div>
+      <div class="check-detail">submit_passphrase: creates IdentityStore, creates TelegramBridge, calls connect_unauthenticated(). If session valid, calls finalize_connection() and returns "ready". Otherwise returns "needs_telegram_auth".</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">Telegram auth handles phone → code → optional 2FA</div>
+      <div class="check-detail">request_telegram_code stores LoginToken in state. submit_telegram_code returns "ready" or "needs_2fa". submit_2fa_password completes 2FA. All intermediate tokens stored in VeilState.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">After setup, main chat view appears with contacts loaded</div>
+      <div class="check-detail">+page.svelte: when SetupView dispatches "complete", onSetupDone() is called which loads contacts and sets up message/pairing listeners. setupComplete flag toggles from SetupView to app shell.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">Subsequent launches skip config, show passphrase only</div>
+      <div class="check-detail">get_setup_status checks api_id first. If already configured, returns "needs_passphrase". SetupView maps this status to the passphrase step directly.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">Setup UI is minimal — fields only, no wizard chrome</div>
+      <div class="check-detail">SetupView: centered on screen, dark background, inputs with bottom-border only, placeholder text instead of labels, accent-colored button, muted red errors inline.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">cargo build succeeds</div>
+      <div class="check-detail">src-tauri/ compiles with warnings only (no errors). All existing types, traits, and modules preserved.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">npm run build succeeds</div>
+      <div class="check-detail">Frontend builds to dist/ with no errors. Accessibility warnings for autofocus are expected and benign in a desktop Tauri context.</div>
+    </div>
+  </div>
+
+  <div class="check">
+    <div class="check-icon ok">✓</div>
+    <div>
+      <div class="check-label">All cargo test passes (54/54)</div>
+      <div class="check-detail">No regressions. Bridge tests, identity store tests, envelope tests, pairing tests, config tests all pass.</div>
+    </div>
+  </div>
+
+</div>
+
+<h2>New Rust Surface</h2>
+<div class="section">
+<div class="code">// src-tauri/src/app/commands.rs — new setup commands
+
+#[tauri::command]
+pub async fn get_setup_status(state: State&lt;'_, VeilState&gt;) -&gt; Result&lt;String, String&gt;
+// Returns: "needs_config" | "needs_passphrase" | "needs_telegram_auth" | "ready"
+
+#[tauri::command]
+pub async fn submit_config(state, api_id: i32, api_hash: String, display_name: String) -&gt; Result&lt;(), String&gt;
+
+#[tauri::command]
+pub async fn submit_passphrase(state, passphrase: String) -&gt; Result&lt;String, String&gt;
+// Returns: "needs_telegram_auth" | "ready"
+
+#[tauri::command]
+pub async fn request_telegram_code(state, phone: String) -&gt; Result&lt;(), String&gt;
+
+#[tauri::command]
+pub async fn submit_telegram_code(state, code: String) -&gt; Result&lt;String, String&gt;
+// Returns: "ready" | "needs_2fa"
+
+#[tauri::command]
+pub async fn submit_2fa_password(state, password: String) -&gt; Result&lt;(), String&gt;</div>
+</div>
+
+<h2>New Frontend Surface</h2>
+<div class="section">
+<div class="code">// frontend/src/lib/api/tauri.ts — setup functions added
+export async function getSetupStatus(): Promise&lt;string&gt;
+export async function submitConfig(apiId: number, apiHash: string, displayName: string): Promise&lt;void&gt;
+export async function submitPassphrase(passphrase: string): Promise&lt;string&gt;
+export async function requestTelegramCode(phone: string): Promise&lt;void&gt;
+export async function submitTelegramCode(code: string): Promise&lt;string&gt;
+export async function submit2faPassword(password: string): Promise&lt;void&gt;
+
+// frontend/src/lib/components/SetupView.svelte — new component
+// Props: status: string
+// Events: complete
+// Steps: config → passphrase → phone → code → 2fa</div>
+</div>
+
+<h2>Key Design Decisions</h2>
+<div class="section">
+  <p><strong>Bridge auth split:</strong> TelegramBridge.connect() is now split into connect_unauthenticated() (opens session, checks auth) and finalize_connection() (reconnects with listener spawned). This allows UI-driven auth between the two calls.</p>
+  <p><strong>Reconnect after auth:</strong> After sign-in, the bridge disconnects and reconnects from the now-authorised session file. This gives a clean updates channel for the listener. The original unauthenticated connection's updates_rx is discarded.</p>
+  <p><strong>Token storage:</strong> LoginToken and PasswordToken are stored in VeilState as Mutex&lt;Option&lt;T&gt;&gt; between the multi-step Telegram auth commands. Tokens are consumed (taken) when used.</p>
+  <p><strong>Existing commands unchanged in behaviour:</strong> list_contacts, send_message, initiate_pairing, complete_pairing, update_envelope, set_theme now unwrap the Option with .as_ref().ok_or("not initialized")? instead of direct access. The error message propagates to the frontend if called before setup.</p>
+</div>
+
+</body>
+</html>

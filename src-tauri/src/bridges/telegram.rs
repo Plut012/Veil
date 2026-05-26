@@ -1,10 +1,10 @@
 use std::collections::HashSet;
-use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use grammers_client::client::UpdatesConfiguration;
 use grammers_client::update::Update;
+use grammers_client::client::{LoginToken, PasswordToken};
 use grammers_client::{Client, SenderPool, SignInError};
 use grammers_session::Session as _;
 use grammers_session::storages::SqliteSession;
@@ -22,7 +22,7 @@ pub struct IncomingMessage {
     pub sender_id: i64,
 }
 
-/// Internal connected state, created on `connect()`.
+/// Internal connected state, created on `connect_unauthenticated()`.
 struct ConnectedState {
     client: Client,
     session: Arc<SqliteSession>,
@@ -125,36 +125,150 @@ impl TelegramBridge {
         });
     }
 
-    /// Perform interactive sign-in via stdin (phone + code + optional 2FA).
-    async fn interactive_sign_in(
-        client: &Client,
-        api_hash: &str,
-    ) -> Result<(), BridgeError> {
-        let phone = prompt("Enter your phone number (with country code): ")
+    /// Connect to Telegram (open session, start network I/O) without performing
+    /// authentication. Returns `true` if already authorized, `false` if sign-in
+    /// is required.
+    pub async fn connect_unauthenticated(&mut self) -> Result<bool, BridgeError> {
+        let session = SqliteSession::open(&self.session_path)
+            .await
             .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
+        let session = Arc::new(session);
 
-        let token = client
-            .request_login_code(phone.trim(), api_hash)
+        let pool = SenderPool::new(Arc::clone(&session), self.api_id);
+        // updates_rx is dropped here — we reconnect after auth to get a fresh channel.
+        let _updates_rx = pool.updates;
+        let runner = pool.runner;
+        let client = Client::new(pool.handle);
+
+        tokio::spawn(runner.run());
+
+        let is_authorized = client
+            .is_authorized()
             .await
             .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
 
-        let code = prompt("Enter the code you received: ")
+        // Store a temporary connected state (self_user_id = 0 until authorized).
+        self.state = Some(ConnectedState {
+            client,
+            session,
+            self_user_id: 0,
+        });
+
+        Ok(is_authorized)
+    }
+
+    /// Request a Telegram login code for the given phone number.
+    /// Must call `connect_unauthenticated()` first.
+    pub async fn request_login_code_for_phone(
+        &self,
+        phone: &str,
+    ) -> Result<LoginToken, BridgeError> {
+        let state = self.state.as_ref().ok_or(BridgeError::NotConnected)?;
+        state
+            .client
+            .request_login_code(phone, &self.api_hash)
+            .await
+            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))
+    }
+
+    /// Sign in with the received code. Returns `Ok(None)` on success, or
+    /// `Ok(Some(PasswordToken))` if 2FA is required.
+    ///
+    /// On success the listener is spawned and `self_user_id` is populated.
+    pub async fn sign_in_with_code(
+        &mut self,
+        token: LoginToken,
+        code: &str,
+    ) -> Result<Option<PasswordToken>, BridgeError> {
+        let client = {
+            let state = self.state.as_ref().ok_or(BridgeError::NotConnected)?;
+            state.client.clone()
+        };
+
+        match client.sign_in(&token, code).await {
+            Ok(_user) => {
+                self.finalize_auth().await?;
+                Ok(None)
+            }
+            Err(SignInError::PasswordRequired(password_token)) => {
+                Ok(Some(password_token))
+            }
+            Err(e) => Err(BridgeError::ConnectionFailed(e.to_string())),
+        }
+    }
+
+    /// Complete 2FA login with the given password.
+    pub async fn check_2fa_password(
+        &mut self,
+        password_token: PasswordToken,
+        password: &str,
+    ) -> Result<(), BridgeError> {
+        let client = {
+            let state = self.state.as_ref().ok_or(BridgeError::NotConnected)?;
+            state.client.clone()
+        };
+
+        client
+            .check_password(password_token, password.as_bytes().to_vec())
+            .await
             .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
 
-        match client.sign_in(&token, code.trim()).await {
-            Ok(_) => {}
-            Err(SignInError::PasswordRequired(password_token)) => {
-                let password = prompt("Enter your 2FA password: ")
-                    .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
-                client
-                    .check_password(password_token, password.trim().as_bytes().to_vec())
-                    .await
-                    .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
-            }
-            Err(e) => {
-                return Err(BridgeError::ConnectionFailed(e.to_string()));
-            }
+        self.finalize_auth().await
+    }
+
+    /// Finalize connection: reconnect with a fresh session (spawns listener).
+    /// Call this after `connect_unauthenticated()` succeeds (session already authorised),
+    /// or after sign-in. Closes the current connection and re-opens with the listener.
+    pub async fn finalize_connection(&mut self) -> Result<(), BridgeError> {
+        self.reconnect_after_auth().await
+    }
+
+    /// Finalize auth: reconnect with a fresh session (spawns listener).
+    async fn finalize_auth(&mut self) -> Result<(), BridgeError> {
+        self.reconnect_after_auth().await
+    }
+
+    /// Close the current connection and reconnect. After sign-in the session
+    /// file is authorised, so this connect will skip auth and spawn the listener.
+    async fn reconnect_after_auth(&mut self) -> Result<(), BridgeError> {
+        // Disconnect current client.
+        if let Some(old_state) = self.state.take() {
+            old_state.client.disconnect();
         }
+
+        // Re-open session (now authorised).
+        let session = SqliteSession::open(&self.session_path)
+            .await
+            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
+        let session = Arc::new(session);
+
+        let pool = SenderPool::new(Arc::clone(&session), self.api_id);
+        let updates_rx = pool.updates;
+        let runner = pool.runner;
+        let client = Client::new(pool.handle);
+
+        tokio::spawn(runner.run());
+
+        let me = client
+            .get_me()
+            .await
+            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
+        let self_user_id = me.id().bare_id();
+
+        Self::spawn_listener(
+            client.clone(),
+            updates_rx,
+            self.monitored_channels.clone(),
+            self.passthrough.clone(),
+            self_user_id,
+            self.message_tx.clone(),
+        );
+
+        self.state = Some(ConnectedState {
+            client,
+            session,
+            self_user_id,
+        });
 
         Ok(())
     }
@@ -197,68 +311,21 @@ impl TelegramBridge {
     }
 }
 
-fn prompt(message: &str) -> io::Result<String> {
-    print!("{}", message);
-    io::stdout().flush()?;
-    let stdin = io::stdin();
-    let mut line = String::new();
-    stdin.lock().read_line(&mut line)?;
-    Ok(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
-}
-
 #[async_trait::async_trait]
 impl Bridge for TelegramBridge {
+    /// Connect and authenticate. If a valid session exists, no auth is needed
+    /// and the listener is spawned immediately. If auth is required, this returns
+    /// an error — use the UI-driven `connect_unauthenticated` / auth methods instead.
     async fn connect(&mut self) -> Result<(), BridgeError> {
-        // Open (or create) the SQLite session file.
-        let session = SqliteSession::open(&self.session_path)
-            .await
-            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
-        let session = Arc::new(session);
-
-        // Build the sender pool and client.
-        let pool = SenderPool::new(Arc::clone(&session), self.api_id);
-        let updates_rx = pool.updates;
-        let runner = pool.runner;
-        let client = Client::new(pool.handle);
-
-        // Spawn the network I/O runner.
-        tokio::spawn(runner.run());
-
-        // Authenticate if needed.
-        let is_authorized = client
-            .is_authorized()
-            .await
-            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
+        let is_authorized = self.connect_unauthenticated().await?;
 
         if !is_authorized {
-            println!("Telegram sign-in required.");
-            Self::interactive_sign_in(&client, &self.api_hash).await?;
+            return Err(BridgeError::ConnectionFailed(
+                "Telegram auth required — use UI setup flow".to_string(),
+            ));
         }
 
-        // Retrieve the self user ID.
-        let me = client
-            .get_me()
-            .await
-            .map_err(|e| BridgeError::ConnectionFailed(e.to_string()))?;
-        let self_user_id = me.id().bare_id();
-
-        // Spawn the message listener task.
-        Self::spawn_listener(
-            client.clone(),
-            updates_rx,
-            self.monitored_channels.clone(),
-            self.passthrough.clone(),
-            self_user_id,
-            self.message_tx.clone(),
-        );
-
-        self.state = Some(ConnectedState {
-            client,
-            session,
-            self_user_id,
-        });
-
-        Ok(())
+        self.reconnect_after_auth().await
     }
 
     async fn disconnect(&mut self) -> Result<(), BridgeError> {
