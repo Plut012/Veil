@@ -224,6 +224,8 @@ mod tests {
             telegram_user_id: 999,
             created_at: Utc::now(),
             envelope_template: "v1".to_string(),
+            is_initiator: false,
+            ratchet: None,
         }
     }
 

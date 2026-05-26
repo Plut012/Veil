@@ -27,6 +27,37 @@ pub fn key_from_base64(encoded: &str) -> Result<[u8; KEY_SIZE], KeyError> {
     Ok(key)
 }
 
+/// Serde module for serializing `[u8; 32]` as URL-safe base64.
+/// Shared across crate — used by Contact, RatchetState, SkippedKey.
+pub(crate) mod base64_serde {
+    use base64::{engine::general_purpose::URL_SAFE, Engine};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(key: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&URL_SAFE.encode(key))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let bytes = URL_SAFE.decode(&s).map_err(serde::de::Error::custom)?;
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom(format!(
+                "invalid key length: expected 32, got {}",
+                bytes.len()
+            )));
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes);
+        Ok(key)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
     #[error("invalid base64 encoding")]

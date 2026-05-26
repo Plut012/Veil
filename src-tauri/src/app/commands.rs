@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::app::state::VeilState;
 use crate::bridges::{Bridge, TelegramBridge};
-use crate::crypto::encrypt;
+use crate::crypto::{encrypt, ratchet_encrypt, ratchet_decrypt, init_ratchet};
 use crate::envelope::{unwrap, wrap};
 use crate::identity::IdentityStore;
 use crate::identity::contact::Contact;
@@ -252,34 +252,46 @@ pub async fn send_message(
     contact_id: String,
     text: String,
 ) -> Result<(), String> {
-    // 1. Look up contact and grab needed fields
-    let (key, channel_id, template) = {
+    // 1. Clone contact from store (release lock for network I/O)
+    let mut contact = {
         let store = state.store.lock().await;
         let store = store.as_ref().ok_or("not initialized")?;
-        let contact = store
+        store
             .get_contact(&contact_id)
-            .ok_or_else(|| format!("contact not found: {contact_id}"))?;
-        (contact.key, contact.telegram_channel_id, contact.envelope_template.clone())
+            .ok_or_else(|| format!("contact not found: {contact_id}"))?
+            .clone()
     };
 
-    // 2. Encrypt
-    let sealed = encrypt(text.as_bytes(), &key);
+    // 2. Encrypt — ratchet or legacy
+    let sealed = if let Some(ref mut ratchet) = contact.ratchet {
+        ratchet_encrypt(ratchet, text.as_bytes())
+    } else {
+        encrypt(text.as_bytes(), &contact.key)
+    };
     let ciphertext_b64 = URL_SAFE.encode(&sealed);
 
     // 3. Wrap in envelope template
-    let envelope = wrap(&ciphertext_b64, &template);
+    let envelope = wrap(&ciphertext_b64, &contact.envelope_template);
 
-    // 4. Send via bridge
+    // 4. Persist ratchet state before send (crash-safe: skipped-key cache
+    //    handles the gap if the subsequent send fails)
+    if contact.ratchet.is_some() {
+        let mut store = state.store.lock().await;
+        let store = store.as_mut().ok_or("not initialized")?;
+        store.update_contact(contact.clone()).map_err(|e| e.to_string())?;
+    }
+
+    // 5. Send via bridge
     {
         let bridge = state.bridge.lock().await;
         let bridge = bridge.as_ref().ok_or("not initialized")?;
         bridge
-            .send(channel_id, &envelope)
+            .send(contact.telegram_channel_id, &envelope)
             .await
             .map_err(|e| e.to_string())?;
     }
 
-    // 5. Emit outgoing message event to frontend
+    // 6. Emit outgoing message event to frontend
     let event = MessageEvent {
         contact_id: contact_id.clone(),
         text,
@@ -366,7 +378,13 @@ pub async fn complete_pairing(
             .map_err(|e| e.to_string())?;
     }
 
-    // 4. Save contact
+    // 4. Save contact — init ratchet for v2 QR payloads
+    let ratchet = if qr.version == 2 {
+        Some(init_ratchet(&qr.key, false))
+    } else {
+        None
+    };
+
     let contact = Contact {
         contact_id: Uuid::new_v4().to_string(),
         display_name: qr.display_name.clone(),
@@ -375,6 +393,8 @@ pub async fn complete_pairing(
         telegram_user_id: qr.telegram_user_id,
         created_at: Utc::now(),
         envelope_template: qr.envelope_template.clone(),
+        is_initiator: false,
+        ratchet,
     };
 
     {
@@ -442,6 +462,12 @@ pub async fn handle_incoming_message(
     if let Some(qr_payload) = pending {
         if let Some(handshake) = parse_handshake_message(text, &qr_payload.key) {
             // Complete initiator side pairing
+            let ratchet = if qr_payload.version == 2 {
+                Some(init_ratchet(&qr_payload.key, true))
+            } else {
+                None
+            };
+
             let contact = Contact {
                 contact_id: Uuid::new_v4().to_string(),
                 display_name: handshake.name.clone(),
@@ -450,6 +476,8 @@ pub async fn handle_incoming_message(
                 telegram_user_id: 0, // unknown at initiator side
                 created_at: Utc::now(),
                 envelope_template: handshake.env.clone(),
+                is_initiator: true,
+                ratchet,
             };
 
             {
@@ -490,24 +518,19 @@ pub async fn handle_incoming_message(
     }
 
     // Normal encrypted message — look up contact by channel
-    let contact_opt = {
+    let mut contact = {
         let store = state.store.lock().await;
-        store.as_ref().and_then(|s| {
-            s.get_contact_by_channel(channel_id)
-                .map(|c| (c.contact_id.clone(), c.key, c.envelope_template.clone()))
-        })
-    };
-
-    let (contact_id, key, template) = match contact_opt {
-        Some(t) => t,
-        None => {
-            log::debug!("received message from unknown channel {channel_id}, ignoring");
-            return;
+        match store.as_ref().and_then(|s| s.get_contact_by_channel(channel_id).cloned()) {
+            Some(c) => c,
+            None => {
+                log::debug!("received message from unknown channel {channel_id}, ignoring");
+                return;
+            }
         }
     };
 
     // Unwrap envelope
-    let ciphertext_b64 = match unwrap(text, &[template.as_str(), ""]) {
+    let ciphertext_b64 = match unwrap(text, &[contact.envelope_template.as_str(), ""]) {
         Some(ct) => ct,
         None => {
             log::debug!("could not unwrap message from channel {channel_id}");
@@ -524,14 +547,34 @@ pub async fn handle_incoming_message(
         }
     };
 
-    // Decrypt
-    let plaintext = match crate::crypto::decrypt(&sealed, &key) {
-        Ok(p) => p,
-        Err(e) => {
-            log::debug!("decrypt failed for channel {channel_id}: {e}");
-            return;
+    // Decrypt — ratchet or legacy
+    let plaintext = if let Some(ref mut ratchet) = contact.ratchet {
+        match ratchet_decrypt(ratchet, &sealed) {
+            Ok(p) => p,
+            Err(e) => {
+                log::debug!("ratchet decrypt failed for channel {channel_id}: {e}");
+                return;
+            }
+        }
+    } else {
+        match crate::crypto::decrypt(&sealed, &contact.key) {
+            Ok(p) => p,
+            Err(e) => {
+                log::debug!("decrypt failed for channel {channel_id}: {e}");
+                return;
+            }
         }
     };
+
+    // Persist updated ratchet state
+    if contact.ratchet.is_some() {
+        let mut store = state.store.lock().await;
+        if let Some(store) = store.as_mut() {
+            if let Err(e) = store.update_contact(contact.clone()) {
+                log::error!("failed to persist ratchet state: {e}");
+            }
+        }
+    }
 
     let plain_text = match String::from_utf8(plaintext) {
         Ok(s) => s,
@@ -542,7 +585,7 @@ pub async fn handle_incoming_message(
     };
 
     let event = MessageEvent {
-        contact_id,
+        contact_id: contact.contact_id.clone(),
         text: plain_text,
         direction: "in".into(),
         timestamp: Utc::now().to_rfc3339(),

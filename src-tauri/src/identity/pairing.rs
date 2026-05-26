@@ -11,6 +11,7 @@ const HANDSHAKE_TYPE: &str = "veil_handshake";
 
 #[derive(Debug, Clone)]
 pub struct QrPayload {
+    pub version: u32,
     pub key: [u8; 32],
     pub telegram_user_id: i64,
     pub display_name: String,
@@ -61,7 +62,7 @@ pub fn create_qr_payload(
     let key = generate_key();
 
     let json = serde_json::to_string(&QrPayloadJson {
-        v: 1,
+        v: 2,
         key: key_to_base64(&key),
         tid: telegram_user_id,
         name: display_name.to_string(),
@@ -69,20 +70,17 @@ pub fn create_qr_payload(
     })
     .map_err(|e| PairingError::Internal(e.to_string()))?;
 
-    let qr = qrcode::QrCode::new(json.as_bytes())
-        .map_err(|e| PairingError::QrGeneration(e.to_string()))?;
+    let qr = qrcode::QrCode::with_error_correction_level(
+        json.as_bytes(),
+        qrcode::EcLevel::H,
+    )
+    .map_err(|e| PairingError::QrGeneration(e.to_string()))?;
 
-    let img = qr.render::<image::Luma<u8>>().build();
-
-    let mut png_bytes: Vec<u8> = Vec::new();
-    image::DynamicImage::ImageLuma8(img)
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .map_err(|e| PairingError::QrGeneration(e.to_string()))?;
+    let png_bytes = crate::identity::qr_style::render_styled_qr(&qr)
+        .map_err(PairingError::QrGeneration)?;
 
     let payload = QrPayload {
+        version: 2,
         key,
         telegram_user_id,
         display_name: display_name.to_string(),
@@ -98,13 +96,14 @@ pub fn parse_qr_payload(qr_data: &str) -> Result<QrPayload, PairingError> {
     let data: QrPayloadJson = serde_json::from_str(qr_data)
         .map_err(|e| PairingError::InvalidQr(e.to_string()))?;
 
-    if data.v != 1 {
+    if data.v != 1 && data.v != 2 {
         return Err(PairingError::UnsupportedVersion(data.v));
     }
 
     let key = key_from_base64(&data.key).map_err(|e| PairingError::InvalidQr(e.to_string()))?;
 
     Ok(QrPayload {
+        version: data.v,
         key,
         telegram_user_id: data.tid,
         display_name: data.name,
@@ -183,9 +182,9 @@ mod tests {
         let (payload, _png) =
             create_qr_payload(123456789, "Alice", "v1").expect("create_qr_payload failed");
 
-        // Serialize back to the JSON format a scanner would see.
+        // Serialize back to the JSON format a scanner would see (v2 now).
         let json = serde_json::to_string(&QrPayloadJson {
-            v: 1,
+            v: 2,
             key: key_to_base64(&payload.key),
             tid: payload.telegram_user_id,
             name: payload.display_name.clone(),
@@ -195,10 +194,29 @@ mod tests {
 
         let parsed = parse_qr_payload(&json).expect("parse_qr_payload failed");
 
+        assert_eq!(parsed.version, 2);
         assert_eq!(parsed.key, payload.key);
         assert_eq!(parsed.telegram_user_id, 123456789);
         assert_eq!(parsed.display_name, "Alice");
         assert_eq!(parsed.envelope_template, "v1");
+    }
+
+    #[test]
+    fn test_v1_qr_accepted() {
+        init_sodium();
+        let key = generate_key();
+        let json = serde_json::to_string(&QrPayloadJson {
+            v: 1,
+            key: key_to_base64(&key),
+            tid: 42,
+            name: "Legacy".to_string(),
+            env: "v1".to_string(),
+        })
+        .unwrap();
+
+        let parsed = parse_qr_payload(&json).expect("v1 should be accepted");
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.key, key);
     }
 
     // --- Invalid version rejected ---
